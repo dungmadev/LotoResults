@@ -8,9 +8,21 @@ import { apiLimiter, sanitizeInput, errorHandler } from './middleware';
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Middleware
+// CORS - allow dev & production origins
+const allowedOrigins = [
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'http://127.0.0.1:5173',
+    'https://lotoresults-frontend.onrender.com',
+];
+
+// Also allow custom origins from env (comma-separated)
+if (process.env.CORS_ORIGIN) {
+    allowedOrigins.push(...process.env.CORS_ORIGIN.split(',').map(s => s.trim()));
+}
+
 app.use(cors({
-    origin: ['http://localhost:5173', 'http://localhost:3000', 'http://127.0.0.1:5173'],
+    origin: allowedOrigins,
     methods: ['GET', 'POST'],
     credentials: true,
 }));
