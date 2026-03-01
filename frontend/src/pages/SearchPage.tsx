@@ -1,12 +1,13 @@
 import { useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { fetchResults, fetchProvinces } from '../services/api';
 import { REGION_NAMES } from '../types';
 import type { Region, DrawResult } from '../types';
 import ResultTable from '../components/ResultTable';
 import LoadingSkeleton from '../components/LoadingSkeleton';
 import ErrorState, { EmptyState } from '../components/ErrorState';
+import AdvancedSearchOptions, { type SearchFilters } from '../components/AdvancedSearchOptions';
 
 export default function SearchPage() {
     const [searchParams, setSearchParams] = useSearchParams();
@@ -16,6 +17,12 @@ export default function SearchPage() {
     const [province, setProvince] = useState<string>(searchParams.get('province') || '');
     const [searchNumber, setSearchNumber] = useState('');
     const [debouncedSearch, setDebouncedSearch] = useState('');
+    const [advancedOpen, setAdvancedOpen] = useState(false);
+    const [searchFilters, setSearchFilters] = useState<SearchFilters>({
+        searchType: 'contains',
+        prizeFilter: '',
+        parityFilter: 'all',
+    });
 
     // Debounce search
     useEffect(() => {
@@ -32,7 +39,7 @@ export default function SearchPage() {
 
     // Results query
     const {
-        data: results,
+        data: rawResults,
         isLoading,
         isError,
         error,
@@ -46,6 +53,50 @@ export default function SearchPage() {
         }),
         staleTime: 1000 * 60 * 2,
     });
+
+    // Apply advanced search filters
+    const results = useMemo(() => {
+        if (!rawResults) return [];
+        if (!debouncedSearch && !searchFilters.prizeFilter && searchFilters.parityFilter === 'all') {
+            return rawResults;
+        }
+
+        return rawResults.filter((result: DrawResult) => {
+            // Filter prizes within each result
+            const matchingPrizes = result.prizes.filter(prize => {
+                // Prize code filter
+                if (searchFilters.prizeFilter && prize.prize_code !== searchFilters.prizeFilter) {
+                    return false;
+                }
+
+                // Number search filter
+                if (debouncedSearch) {
+                    const hasMatch = prize.numbers.some(num => {
+                        switch (searchFilters.searchType) {
+                            case 'startsWith': return num.startsWith(debouncedSearch);
+                            case 'endsWith': return num.endsWith(debouncedSearch);
+                            case 'contains':
+                            default: return num.includes(debouncedSearch);
+                        }
+                    });
+                    if (!hasMatch) return false;
+                }
+
+                // Parity filter (check last digit of each number)
+                if (searchFilters.parityFilter !== 'all') {
+                    const hasMatch = prize.numbers.some(num => {
+                        const lastDigit = parseInt(num.slice(-1));
+                        return searchFilters.parityFilter === 'even' ? lastDigit % 2 === 0 : lastDigit % 2 !== 0;
+                    });
+                    if (!hasMatch) return false;
+                }
+
+                return true;
+            });
+
+            return matchingPrizes.length > 0;
+        });
+    }, [rawResults, debouncedSearch, searchFilters]);
 
     // Sync URL params from event handlers
     const syncParams = (overrides: { date?: string; region?: string; province?: string } = {}) => {
@@ -141,6 +192,16 @@ export default function SearchPage() {
                     </button>
                 </div>
             </div>
+
+            {/* Advanced Search Options */}
+            {searchNumber && (
+                <AdvancedSearchOptions
+                    filters={searchFilters}
+                    onFiltersChange={setSearchFilters}
+                    isOpen={advancedOpen}
+                    onToggle={() => setAdvancedOpen(!advancedOpen)}
+                />
+            )}
 
             {/* Results */}
             {isLoading ? (

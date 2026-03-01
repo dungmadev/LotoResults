@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { fetchResults } from '../services/api';
 import { REGION_NAMES } from '../types';
 import type { Region, DrawResult } from '../types';
@@ -20,9 +20,36 @@ function getDatesInRange(days: number): string[] {
 }
 
 export default function HistoryPage() {
-    const [timeRange, setTimeRange] = useState<TimeRange>(7);
-    const [regionFilter, setRegionFilter] = useState<string>('');
+    const [searchParams, setSearchParams] = useSearchParams();
+
+    // Initialize state from URL params
+    const [timeRange, setTimeRange] = useState<TimeRange>(() => {
+        const rangeParam = searchParams.get('range');
+        return (rangeParam === '7' || rangeParam === '30' || rangeParam === '90')
+            ? parseInt(rangeParam) as TimeRange
+            : 7;
+    });
+    const [regionFilter, setRegionFilter] = useState<string>(searchParams.get('region') || '');
     const navigate = useNavigate();
+
+    // Sync URL params from event handlers
+    const syncParams = (overrides: { range?: number; region?: string } = {}) => {
+        const params = new URLSearchParams();
+        params.set('range', (overrides.range ?? timeRange).toString());
+        const r = overrides.region ?? regionFilter;
+        if (r) params.set('region', r);
+        setSearchParams(params, { replace: true });
+    };
+
+    const handleTimeRangeChange = (newRange: TimeRange) => {
+        setTimeRange(newRange);
+        syncParams({ range: newRange });
+    };
+
+    const handleRegionFilterChange = (newRegion: string) => {
+        setRegionFilter(newRegion);
+        syncParams({ region: newRegion });
+    };
 
     const dates = getDatesInRange(timeRange);
 
@@ -73,7 +100,7 @@ export default function HistoryPage() {
                         <button
                             key={range}
                             className={`tab ${timeRange === range ? 'active' : ''}`}
-                            onClick={() => setTimeRange(range)}
+                            onClick={() => handleTimeRangeChange(range)}
                         >
                             {range} ngày
                         </button>
@@ -83,7 +110,7 @@ export default function HistoryPage() {
                 <select
                     className="filter-select animate-fade-in stagger-2"
                     value={regionFilter}
-                    onChange={(e) => setRegionFilter(e.target.value)}
+                    onChange={(e) => handleRegionFilterChange(e.target.value)}
                     style={{ minWidth: '140px' }}
                 >
                     <option value="">Tất cả miền</option>

@@ -29,6 +29,7 @@ export function initializeDb(): void {
       name TEXT NOT NULL,
       region TEXT NOT NULL CHECK(region IN ('mb', 'mt', 'mn')),
       draw_days TEXT NOT NULL,
+      draw_time TEXT DEFAULT '18:00',
       active INTEGER DEFAULT 1
     );
 

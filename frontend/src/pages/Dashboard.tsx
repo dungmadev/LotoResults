@@ -6,6 +6,7 @@ import type { Region, DrawResult } from '../types';
 import ResultTable from '../components/ResultTable';
 import { CardSkeleton } from '../components/LoadingSkeleton';
 import ErrorState from '../components/ErrorState';
+import Countdown from '../components/Countdown';
 import { useState } from 'react';
 
 const REGIONS: Region[] = ['mb', 'mt', 'mn'];
@@ -64,6 +65,8 @@ export default function Dashboard() {
             </section>
 
             {/* Quick Search */}
+            <Countdown />
+            
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '32px' }}>
                 <div className="search-box animate-fade-in stagger-1">
                     <span className="search-icon">🔍</span>
