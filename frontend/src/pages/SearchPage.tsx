@@ -7,6 +7,7 @@ import type { Region, DrawResult } from '../types';
 import ResultTable from '../components/ResultTable';
 import LoadingSkeleton from '../components/LoadingSkeleton';
 import ErrorState, { EmptyState } from '../components/ErrorState';
+import AdvancedSearchOptions, { type SearchFilters } from '../components/AdvancedSearchOptions';
 
 export default function SearchPage() {
     const [searchParams, setSearchParams] = useSearchParams();
@@ -16,6 +17,12 @@ export default function SearchPage() {
     const [province, setProvince] = useState<string>(searchParams.get('province') || '');
     const [searchNumber, setSearchNumber] = useState('');
     const [debouncedSearch, setDebouncedSearch] = useState('');
+    const [advancedOpen, setAdvancedOpen] = useState(false);
+    const [searchFilters, setSearchFilters] = useState<SearchFilters>({
+        searchType: 'contains',
+        prizeFilter: '',
+        parityFilter: 'all',
+    });
 
     // Debounce search
     useEffect(() => {
@@ -32,7 +39,7 @@ export default function SearchPage() {
 
     // Results query
     const {
-        data: results,
+        data: rawResults,
         isLoading,
         isError,
         error,
@@ -141,6 +148,16 @@ export default function SearchPage() {
                     </button>
                 </div>
             </div>
+
+            {/* Advanced Search Options */}
+            {searchNumber && (
+                <AdvancedSearchOptions
+                    filters={searchFilters}
+                    onFiltersChange={setSearchFilters}
+                    isOpen={advancedOpen}
+                    onToggle={() => setAdvancedOpen(!advancedOpen)}
+                />
+            )}
 
             {/* Results */}
             {isLoading ? (
