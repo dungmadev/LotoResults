@@ -10,5 +10,12 @@ coverage/
 Thumbs.db
 *.sqlite
 *.db
+*.db-shm
+*.db-wal
 data/*.sqlite
+backend/data/
 backend/data/*.sqlite
+backend/data/*.db
+backend/data/*.db-shm
+backend/data/*.db-wal
+backend/node_modules/

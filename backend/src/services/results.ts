@@ -5,6 +5,7 @@ import {
     resultsCacheKey, latestCacheKey, provincesCacheKey,
     OLD_RESULT_TTL, LATEST_RESULT_TTL, PROVINCE_TTL
 } from './cache';
+import { crawlQueue } from './crawlQueue';
 
 interface DrawRow {
     id: number;
@@ -53,10 +54,23 @@ function buildDrawResults(drawRows: DrawRow[]): DrawResult[] {
     }));
 }
 
-export function getResults(query: ResultsQuery): DrawResult[] {
-    const cacheKey = resultsCacheKey(query.date || '', query.region, query.province);
-    const cached = getCache<DrawResult[]>(cacheKey);
-    if (cached) return cached;
+export interface GetResultsResponse {
+    results: DrawResult[];
+    meta: {
+        status: 'ready' | 'crawling';
+        message?: string;
+    };
+}
+
+export async function getResults(query: ResultsQuery): Promise<GetResultsResponse> {
+    // Skip cache if there are pending crawl jobs for this date
+    const hasPendingJobs = query.date ? crawlQueue.hasPendingJobsForDate(query.date) : false;
+
+    if (!hasPendingJobs) {
+        const cacheKey = resultsCacheKey(query.date || '', query.region, query.province);
+        const cached = getCache<DrawResult[]>(cacheKey);
+        if (cached) return { results: cached, meta: { status: 'ready' } };
+    }
 
     const db = getDb();
     let sql = `
@@ -85,12 +99,44 @@ export function getResults(query: ResultsQuery): DrawResult[] {
     const drawRows = db.prepare(sql).all(...params) as DrawRow[];
     const results = buildDrawResults(drawRows);
 
-    // Cache: old dates get long TTL, today gets short TTL
-    const today = new Date().toISOString().split('T')[0];
-    const ttl = query.date && query.date < today ? OLD_RESULT_TTL : LATEST_RESULT_TTL;
-    setCache(cacheKey, results, ttl);
+    // If crawl jobs are still pending for this date, return partial results + 'crawling' status
+    // Do NOT cache — next request should fetch fresh data from DB
+    if (hasPendingJobs) {
+        return {
+            results,
+            meta: {
+                status: 'crawling',
+                message: 'Đang tải thêm dữ liệu. Kết quả sẽ được cập nhật tự động.',
+            },
+        };
+    }
 
-    return results;
+    if (results.length > 0) {
+        // All jobs done — safe to cache
+        const cacheKey = resultsCacheKey(query.date || '', query.region, query.province);
+        const today = new Date().toISOString().split('T')[0];
+        const ttl = query.date && query.date < today ? OLD_RESULT_TTL : LATEST_RESULT_TTL;
+        setCache(cacheKey, results, ttl);
+        return { results, meta: { status: 'ready' } };
+    }
+
+    // No data found — enqueue crawl jobs (non-blocking)
+    if (query.date) {
+        const regionsToCrawl: Region[] = query.region ? [query.region] : ['mb', 'mt', 'mn'];
+        for (const r of regionsToCrawl) {
+            crawlQueue.enqueue(query.date, r);
+        }
+
+        return {
+            results: [],
+            meta: {
+                status: 'crawling',
+                message: 'Đang tải dữ liệu từ nguồn. Kết quả sẽ được cập nhật tự động.',
+            },
+        };
+    }
+
+    return { results: [], meta: { status: 'ready' } };
 }
 
 export function getLatestResults(query: LatestQuery): DrawResult[] {
@@ -161,8 +207,35 @@ export function getProvinces(region?: string): Province[] {
     return provinces;
 }
 
-export function searchByNumber(number: string, date?: string, region?: string): DrawResult[] {
+export type SearchMode = 'contains' | 'starts' | 'ends';
+
+export function searchByNumber(
+    number: string,
+    date?: string,
+    region?: string,
+    mode: SearchMode = 'contains',
+    prizeCode?: string,
+): DrawResult[] {
     const db = getDb();
+
+    // Build LIKE pattern based on search mode
+    let likePattern: string;
+    switch (mode) {
+        case 'starts':
+            // Match numbers that start with the search term
+            // numbers is stored as JSON array: ["12345","67890"]
+            likePattern = `%"${number}%`;
+            break;
+        case 'ends':
+            // Match numbers that end with the search term
+            likePattern = `%${number}"%`;
+            break;
+        case 'contains':
+        default:
+            likePattern = `%${number}%`;
+            break;
+    }
+
     let sql = `
     SELECT DISTINCT d.*, p.name as province_name
     FROM draws d
@@ -170,7 +243,13 @@ export function searchByNumber(number: string, date?: string, region?: string): 
     JOIN prizes pr ON pr.draw_id = d.id
     WHERE pr.numbers LIKE ?
   `;
-    const params: any[] = [`%${number}%`];
+    const params: any[] = [likePattern];
+
+    // Filter by specific prize tier (db, g1, g2, ...)
+    if (prizeCode) {
+        sql += ' AND pr.prize_code = ?';
+        params.push(prizeCode);
+    }
 
     if (date) {
         sql += ' AND d.draw_date = ?';

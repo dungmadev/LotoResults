@@ -5,6 +5,7 @@ export interface Province {
     name: string;
     region: Region;
     draw_days: string[];
+    draw_time?: string;
     active: boolean;
 }
 
@@ -36,6 +37,8 @@ export interface ApiResponse<T> {
         source?: string;
         cached?: boolean;
         fetched_at?: string;
+        status?: 'ready' | 'crawling';
+        message?: string;
     };
 }
 

@@ -1,12 +1,14 @@
 import { useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { useState, useEffect } from 'react';
-import { fetchResults, fetchProvinces } from '../services/api';
-import { REGION_NAMES } from '../types';
+import { fetchResults, fetchProvinces, searchByNumber } from '../services/api';
+import type { FetchResultsResponse } from '../services/api';
+import { REGION_NAMES, PRIZE_NAMES } from '../types';
 import type { Region, DrawResult } from '../types';
 import ResultTable from '../components/ResultTable';
 import LoadingSkeleton from '../components/LoadingSkeleton';
 import ErrorState, { EmptyState } from '../components/ErrorState';
+import AdvancedSearchOptions, { type SearchFilters } from '../components/AdvancedSearchOptions';
 
 export default function SearchPage() {
     const [searchParams, setSearchParams] = useSearchParams();
@@ -16,6 +18,14 @@ export default function SearchPage() {
     const [province, setProvince] = useState<string>(searchParams.get('province') || '');
     const [searchNumber, setSearchNumber] = useState('');
     const [debouncedSearch, setDebouncedSearch] = useState('');
+    const [searchMode, setSearchMode] = useState<'contains' | 'starts' | 'ends'>('contains');
+    const [prizeFilter, setPrizeFilter] = useState('');
+    const [advancedOpen, setAdvancedOpen] = useState(false);
+    const [searchFilters, setSearchFilters] = useState<SearchFilters>({
+        searchType: 'contains',
+        prizeFilter: '',
+        parityFilter: 'all',
+    });
 
     // Debounce search
     useEffect(() => {
@@ -30,24 +40,43 @@ export default function SearchPage() {
         staleTime: 1000 * 60 * 60,
     });
 
-    // Results query
+    // Results query — use search API when number is entered, otherwise use results API
     const {
-        data: results,
+        data: rawData,
         isLoading,
         isError,
         error,
         refetch,
-    } = useQuery({
-        queryKey: ['results', date, region, province],
-        queryFn: () => fetchResults({
-            date: date || undefined,
-            region: region || undefined,
-            province: province || undefined,
-        }),
+    } = useQuery<FetchResultsResponse | DrawResult[]>({
+        queryKey: debouncedSearch
+            ? ['search', debouncedSearch, date, region, searchMode, prizeFilter]
+            : ['results', date, region, province],
+        queryFn: () => debouncedSearch
+            ? searchByNumber({
+                number: debouncedSearch,
+                date: date || undefined,
+                region: region || undefined,
+                mode: searchMode,
+                prize_code: prizeFilter || undefined,
+            })
+            : fetchResults({
+                date: date || undefined,
+                region: region || undefined,
+                province: province || undefined,
+            }),
         staleTime: 1000 * 60 * 2,
     });
 
-    // Sync URL params from event handlers
+    // Normalize: fetchResults returns { results, meta }, searchByNumber returns DrawResult[]
+    const isFetchResponse = rawData && 'results' in rawData && 'meta' in rawData;
+    const results: DrawResult[] = isFetchResponse
+        ? (rawData as FetchResultsResponse).results
+        : (rawData as DrawResult[] | undefined) || [];
+    const crawlStatus = isFetchResponse
+        ? (rawData as FetchResultsResponse).meta
+        : { status: 'ready' as const };
+
+    // Sync URL with explicit named query params
     const syncParams = (overrides: { date?: string; region?: string; province?: string } = {}) => {
         const params = new URLSearchParams();
         const d = overrides.date ?? date;
@@ -135,12 +164,59 @@ export default function SearchPage() {
                     />
                 </div>
 
+                <div className="filter-group">
+                    <label className="filter-label">Kiểu tìm</label>
+                    <select
+                        className="filter-select"
+                        value={searchMode}
+                        onChange={(e) => setSearchMode(e.target.value as 'contains' | 'starts' | 'ends')}
+                    >
+                        <option value="contains">Chứa số</option>
+                        <option value="starts">Bắt đầu bằng</option>
+                        <option value="ends">Kết thúc bằng</option>
+                    </select>
+                </div>
+
+                <div className="filter-group">
+                    <label className="filter-label">Lọc giải</label>
+                    <select
+                        className="filter-select"
+                        value={prizeFilter}
+                        onChange={(e) => setPrizeFilter(e.target.value)}
+                    >
+                        <option value="">Tất cả giải</option>
+                        {Object.entries(PRIZE_NAMES).map(([code, name]) => (
+                            <option key={code} value={code}>{name}</option>
+                        ))}
+                    </select>
+                </div>
+
                 <div className="filter-group" style={{ alignSelf: 'flex-end' }}>
                     <button className="btn btn-primary" onClick={() => refetch()}>
                         🔄 Làm mới
                     </button>
                 </div>
             </div>
+
+            {/* Advanced Search Options */}
+            {searchNumber && (
+                <AdvancedSearchOptions
+                    filters={searchFilters}
+                    onFiltersChange={setSearchFilters}
+                    isOpen={advancedOpen}
+                    onToggle={() => setAdvancedOpen(!advancedOpen)}
+                />
+            )}
+
+            {/* Crawl Status Banner */}
+            {crawlStatus.status === 'crawling' && (
+                <div className="crawl-status-banner animate-fade-in">
+                    <div className="crawl-spinner" />
+                    <span className="crawl-message">
+                        {crawlStatus.message || 'Đang tải dữ liệu từ nguồn...'}
+                    </span>
+                </div>
+            )}
 
             {/* Results */}
             {isLoading ? (

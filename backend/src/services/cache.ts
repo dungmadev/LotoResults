@@ -23,6 +23,18 @@ export function clearCache(): void {
     cache.clear();
 }
 
+/**
+ * Clear all cache entries whose key starts with the given prefix.
+ * Used to invalidate results for a specific date when new crawl data arrives.
+ */
+export function clearByPrefix(prefix: string): void {
+    for (const key of cache.keys()) {
+        if (key.startsWith(prefix)) {
+            cache.delete(key);
+        }
+    }
+}
+
 // Cache keys generator
 export function resultsCacheKey(date: string, region?: string, province?: string): string {
     return `results:${date}:${region || 'all'}:${province || 'all'}`;

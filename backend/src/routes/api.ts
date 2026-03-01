@@ -1,12 +1,16 @@
 import { Router, Request, Response } from 'express';
 import { getResults, getLatestResults, getProvinces, searchByNumber } from '../services/results';
+import type { SearchMode } from '../services/results';
+import { getFrequencyStats, getHotColdNumbers, exportFrequencyCSV } from '../services/statistics';
 import { validateDate, validateRegion } from '../middleware';
 import { ResultsQuery, LatestQuery, Region, ApiResponse, DrawResult, Province } from '../types';
+import { crawlQueue } from '../services/crawlQueue';
+import { sseManager } from '../services/sseManager';
 
 const router = Router();
 
 // GET /api/results?date=YYYY-MM-DD&region=mb|mt|mn&province=...
-router.get('/results', (req: Request, res: Response) => {
+router.get('/results', async (req: Request, res: Response) => {
     try {
         const { date, region, province } = req.query;
 
@@ -32,15 +36,17 @@ router.get('/results', (req: Request, res: Response) => {
             province: province as string | undefined,
         };
 
-        const results = getResults(query);
+        const { results, meta: crawlMeta } = await getResults(query);
 
         res.json({
             success: true,
             data: results,
             meta: {
                 total: results.length,
+                status: crawlMeta.status,
+                message: crawlMeta.message,
             },
-        } as ApiResponse<DrawResult[]>);
+        });
     } catch (error) {
         console.error('[GET /api/results]', error);
         res.status(500).json({
@@ -117,10 +123,10 @@ router.get('/provinces', (req: Request, res: Response) => {
     }
 });
 
-// GET /api/search?number=...&date=...&region=...
+// GET /api/search?number=...&date=...&region=...&mode=contains|starts|ends&prize_code=db|g1|...
 router.get('/search', (req: Request, res: Response) => {
     try {
-        const { number, date, region } = req.query;
+        const { number, date, region, mode, prize_code } = req.query;
 
         if (!number || (number as string).trim().length === 0) {
             res.status(400).json({
@@ -148,7 +154,19 @@ router.get('/search', (req: Request, res: Response) => {
             return;
         }
 
-        const results = searchByNumber(cleanNumber, date as string, region as string);
+        // Validate search mode
+        const validModes = ['contains', 'starts', 'ends'];
+        const searchMode: SearchMode = (mode && validModes.includes(mode as string))
+            ? (mode as SearchMode)
+            : 'contains';
+
+        // Validate prize_code
+        const validPrizeCodes = ['db', 'g1', 'g2', 'g3', 'g4', 'g5', 'g6', 'g7', 'g8'];
+        const prizeCode = (prize_code && validPrizeCodes.includes(prize_code as string))
+            ? (prize_code as string)
+            : undefined;
+
+        const results = searchByNumber(cleanNumber, date as string, region as string, searchMode, prizeCode);
 
         res.json({
             success: true,
@@ -166,4 +184,186 @@ router.get('/search', (req: Request, res: Response) => {
     }
 });
 
+// SSE endpoint — real-time event stream for Frontend
+router.get('/events', (req: Request, res: Response) => {
+    // Disable request timeout for SSE
+    req.setTimeout(0);
+    sseManager.addClient(res);
+});
+
+// GET /api/queue/status — check crawl queue status
+router.get('/queue/status', (_req: Request, res: Response) => {
+    try {
+        const status = crawlQueue.getStatus();
+        res.json({
+            success: true,
+            data: status,
+        });
+    } catch (error) {
+        console.error('[GET /api/queue/status]', error);
+        res.status(500).json({ success: false, error: 'Không thể lấy trạng thái hàng đợi.' });
+    }
+});
+
+// POST /api/crawl — enqueue crawl request (non-blocking)
+router.post('/crawl', (req: Request, res: Response) => {
+    try {
+        const { date, region } = req.body as { date?: string; region?: string };
+
+        if (!date || !validateDate(date)) {
+            res.status(400).json({ success: false, error: 'Ngày không hợp lệ (YYYY-MM-DD).' });
+            return;
+        }
+        const validRegion = (region && ['mb', 'mt', 'mn'].includes(region)) ? region as Region : 'mb';
+
+        const result = crawlQueue.enqueue(date, validRegion);
+
+        res.json({
+            success: true,
+            data: {
+                enqueued: result.enqueued,
+                jobId: result.jobId,
+                reason: result.reason,
+                message: result.enqueued
+                    ? `Đã thêm vào hàng đợi: ${validRegion.toUpperCase()} ngày ${date}`
+                    : result.reason,
+            },
+        });
+    } catch (error) {
+        console.error('[POST /api/crawl]', error);
+        res.status(500).json({ success: false, error: 'Crawl thất bại.' });
+    }
+});
+
+// POST /api/backfill — crawl historical results (MB only for now)
+router.post('/backfill', async (req: Request, res: Response) => {
+    try {
+        const days = Math.min(Number(req.body?.days) || 30, 90);
+
+        const { crawlBackfill } = await import('../crawler/crawler');
+        const saved = await crawlBackfill(days);
+
+        res.json({
+            success: true,
+            data: { saved, days },
+        });
+    } catch (error) {
+        console.error('[POST /api/backfill]', error);
+        res.status(500).json({ success: false, error: 'Backfill thất bại.' });
+    }
+});
+
+// GET /api/stats/frequency?region=...&days=...
+router.get('/stats/frequency', (req: Request, res: Response) => {
+    try {
+        const { region, days } = req.query;
+
+        if (region && !validateRegion(region as string)) {
+            res.status(400).json({
+                success: false,
+                error: 'Miền không hợp lệ. Sử dụng: mb, mt, hoặc mn.',
+            } as ApiResponse<null>);
+            return;
+        }
+
+        const daysNum = days ? parseInt(days as string, 10) : 30;
+        if (!days || isNaN(daysNum) || daysNum < 1 || daysNum > 365) {
+            res.status(400).json({
+                success: false,
+                error: 'Số ngày phải từ 1-365.',
+            } as ApiResponse<null>);
+            return;
+        }
+
+        const stats = getFrequencyStats(region as Region | undefined, daysNum);
+
+        res.json({
+            success: true,
+            data: stats,
+        } as ApiResponse<typeof stats>);
+    } catch (error) {
+        console.error('[GET /api/stats/frequency]', error);
+        res.status(500).json({
+            success: false,
+            error: 'Không thể tải thống kê. Vui lòng thử lại.',
+        } as ApiResponse<null>);
+    }
+});
+
+// GET /api/stats/hot-cold?region=...&days=...&limit=...
+router.get('/stats/hot-cold', (req: Request, res: Response) => {
+    try {
+        const { region, days, limit } = req.query;
+
+        if (region && !validateRegion(region as string)) {
+            res.status(400).json({
+                success: false,
+                error: 'Miền không hợp lệ. Sử dụng: mb, mt, hoặc mn.',
+            } as ApiResponse<null>);
+            return;
+        }
+
+        const daysNum = days ? parseInt(days as string, 10) : 30;
+        const limitNum = limit ? parseInt(limit as string, 10) : 10;
+
+        if (!days || isNaN(daysNum) || daysNum < 1 || daysNum > 365) {
+            res.status(400).json({
+                success: false,
+                error: 'Số ngày phải từ 1-365.',
+            } as ApiResponse<null>);
+            return;
+        }
+
+        if (!limit || isNaN(limitNum) || limitNum < 1 || limitNum > 50) {
+            res.status(400).json({
+                success: false,
+                error: 'Limit phải từ 1-50.',
+            } as ApiResponse<null>);
+            return;
+        }
+
+        const data = getHotColdNumbers(region as Region | undefined, daysNum, limitNum);
+
+        res.json({
+            success: true,
+            data,
+        } as ApiResponse<typeof data>);
+    } catch (error) {
+        console.error('[GET /api/stats/hot-cold]', error);
+        res.status(500).json({
+            success: false,
+            error: 'Không thể tải thống kê. Vui lòng thử lại.',
+        } as ApiResponse<null>);
+    }
+});
+
+// GET /api/stats/frequency/export?region=...&days=...
+router.get('/stats/frequency/export', (req: Request, res: Response) => {
+    try {
+        const { region, days } = req.query;
+
+        if (region && !validateRegion(region as string)) {
+            res.status(400).send('Miền không hợp lệ. Sử dụng: mb, mt, hoặc mn.');
+            return;
+        }
+
+        const daysNum = days ? parseInt(days as string) : 30;
+        if (isNaN(daysNum) || daysNum < 1 || daysNum > 365) {
+            res.status(400).send('Số ngày phải từ 1-365.');
+            return;
+        }
+
+        const stats = getFrequencyStats(region as Region | undefined, daysNum);
+        const csv = exportFrequencyCSV(stats);
+
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="frequency-stats-${stats.dateRange.start}-${stats.dateRange.end}.csv"`);
+        res.send('\uFEFF' + csv); // BOM for UTF-8
+    } catch (error) {
+        console.error('[GET /api/stats/frequency/export]', error);
+        res.status(500).send('Không thể xuất dữ liệu. Vui lòng thử lại.');
+    }
+});
+
 export default router;
+

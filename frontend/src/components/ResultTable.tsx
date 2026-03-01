@@ -1,5 +1,6 @@
 import type { DrawResult } from '../types';
 import { PRIZE_NAMES, PRIZE_ORDER_MB, PRIZE_ORDER_MT_MN } from '../types';
+import { useExport } from '../hooks/useExport';
 
 interface ResultTableProps {
     result: DrawResult;
@@ -8,6 +9,7 @@ interface ResultTableProps {
 
 export default function ResultTable({ result, searchNumber }: ResultTableProps) {
     const prizeOrder = result.region === 'mb' ? PRIZE_ORDER_MB : PRIZE_ORDER_MT_MN;
+    const { copyResultText, shareResult, copyStatus } = useExport();
 
     const highlightNumber = (num: string): boolean => {
         if (!searchNumber || searchNumber.trim() === '') return false;
@@ -53,6 +55,23 @@ export default function ResultTable({ result, searchNumber }: ResultTableProps) 
                     })}
                 </tbody>
             </table>
+            <div className="result-actions">
+                <button
+                    className="btn btn-sm btn-secondary"
+                    onClick={() => copyResultText(result)}
+                    title="Sao chép kết quả"
+                >
+                    {copyStatus === 'copied' ? '✅ Đã sao chép!' : '📋 Sao chép'}
+                </button>
+                <button
+                    className="btn btn-sm btn-secondary"
+                    onClick={() => shareResult(result)}
+                    title="Chia sẻ kết quả"
+                >
+                    📤 Chia sẻ
+                </button>
+            </div>
         </div>
     );
 }
+
