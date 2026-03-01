@@ -24,9 +24,12 @@ export const PROVINCES = [
     { id: 'hcm', name: 'TP. Hồ Chí Minh', region: 'mn' as Region, draw_days: ['saturday', 'monday'] },
     { id: 'dongnai', name: 'Đồng Nai', region: 'mn' as Region, draw_days: ['wednesday'] },
     { id: 'cantho', name: 'Cần Thơ', region: 'mn' as Region, draw_days: ['wednesday'] },
+    { id: 'soctrang', name: 'Sóc Trăng', region: 'mn' as Region, draw_days: ['wednesday'] },
     { id: 'dongthap', name: 'Đồng Tháp', region: 'mn' as Region, draw_days: ['monday'] },
     { id: 'bariavungtau', name: 'Bà Rịa - Vũng Tàu', region: 'mn' as Region, draw_days: ['tuesday'] },
+    { id: 'baclieu', name: 'Bạc Liêu', region: 'mn' as Region, draw_days: ['tuesday'] },
     { id: 'binhduong', name: 'Bình Dương', region: 'mn' as Region, draw_days: ['friday'] },
+    { id: 'travinh', name: 'Trà Vinh', region: 'mn' as Region, draw_days: ['friday'] },
     { id: 'tayninh', name: 'Tây Ninh', region: 'mn' as Region, draw_days: ['thursday'] },
     { id: 'angiang', name: 'An Giang', region: 'mn' as Region, draw_days: ['thursday'] },
     { id: 'binhthuan', name: 'Bình Thuận', region: 'mn' as Region, draw_days: ['thursday'] },
@@ -34,6 +37,8 @@ export const PROVINCES = [
     { id: 'bentre', name: 'Bến Tre', region: 'mn' as Region, draw_days: ['tuesday'] },
     { id: 'camau', name: 'Cà Mau', region: 'mn' as Region, draw_days: ['monday'] },
     { id: 'longan', name: 'Long An', region: 'mn' as Region, draw_days: ['saturday'] },
+    { id: 'binhphuoc', name: 'Bình Phước', region: 'mn' as Region, draw_days: ['saturday'] },
+    { id: 'haugiang', name: 'Hậu Giang', region: 'mn' as Region, draw_days: ['saturday'] },
     { id: 'kiengiang', name: 'Kiên Giang', region: 'mn' as Region, draw_days: ['sunday'] },
     { id: 'tiengiang', name: 'Tiền Giang', region: 'mn' as Region, draw_days: ['sunday'] },
     { id: 'dalat', name: 'Đà Lạt', region: 'mn' as Region, draw_days: ['sunday'] },
@@ -42,6 +47,8 @@ export const PROVINCES = [
 function removeAccents(str: string): string {
     return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/đ/g, "d").replace(/[^a-z0-9]/g, "");
 }
+
+import { getDb } from '../db/database';
 
 export function findProvinceId(name: string, region: Region): string {
     if (region === 'mb') return 'hanoi'; // MB always maps to hanoi currently
@@ -70,10 +77,52 @@ export function findProvinceId(name: string, region: Region): string {
         if (normalized.includes('tphcm') || normalized.includes('tp')) return 'hcm';
         if (normalized.includes('hcm')) return 'hcm';
         if (normalized.includes('vungtau') || normalized.includes('brvt')) return 'bariavungtau';
+        if (normalized.includes('soctrang') || normalized.includes('strang')) return 'soctrang';
+        if (normalized.includes('baclieu') || normalized.includes('blieu')) return 'baclieu';
+        if (normalized.includes('travinh') || normalized.includes('tvinh')) return 'travinh';
+        if (normalized.includes('binhphuoc') || normalized.includes('bphuoc')) return 'binhphuoc';
+        if (normalized.includes('haugiang') || normalized.includes('hgiang')) return 'haugiang';
     }
 
-    console.warn(`[PROVINCE] Could not match province for "${name}" in region ${region}. Using generic.`);
-    return `${region}_general`;
+    // --- Dynamic Province Registration ---
+    // Province not found in static list → auto-register it in DB + memory
+    const newId = normalized || `${region}_${Date.now()}`;
+    console.warn(`[PROVINCE] Unknown province "${name}" in ${region} → auto-registering as "${newId}"`);
+
+    return registerNewProvince(newId, name, region);
+}
+
+/**
+ * Auto-register a new province in both DB and in-memory list.
+ * Called when crawler finds a province not in the static PROVINCES list.
+ *
+ * Uses INSERT OR IGNORE to handle concurrent registration safely.
+ * Detects draw_days from the current date (best-effort — we know this
+ * province draws today, we don't know its full weekly schedule).
+ */
+function registerNewProvince(id: string, name: string, region: Region): string {
+    const DAY_NAMES_REG = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    const today = DAY_NAMES_REG[new Date().getDay()];
+
+    // Add to in-memory list (if not already present)
+    const exists = PROVINCES.find(p => p.id === id);
+    if (!exists) {
+        PROVINCES.push({ id, name, region, draw_days: [today] });
+        console.log(`[PROVINCE] ✅ Added to memory: "${name}" (${id}) in ${region}, draw_day: ${today}`);
+    }
+
+    // Insert into DB (INSERT OR IGNORE avoids duplicate errors)
+    try {
+        const db = getDb();
+        db.prepare(
+            'INSERT OR IGNORE INTO provinces (id, name, region, draw_days, draw_time, active) VALUES (?, ?, ?, ?, ?, ?)'
+        ).run(id, name, region, JSON.stringify([today]), '16:15', 1);
+        console.log(`[PROVINCE] ✅ Saved to DB: "${name}" (${id}) in ${region}`);
+    } catch (error) {
+        console.error(`[PROVINCE] ❌ Failed to save to DB: ${(error as Error).message}`);
+    }
+
+    return id;
 }
 
 // --- Day-of-week helpers ---

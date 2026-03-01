@@ -52,3 +52,31 @@ Người dùng phản ánh rằng khi fetch dữ liệu xổ số, có **quá nh
 - Progress bar giờ chính xác hơn: ví dụ crawl ngày Thứ Hai sẽ hiện total = tổng tỉnh MB + MT + MN xổ vào Thứ Hai (≈6-8 tỉnh), thay vì luôn là 3 (3 regions)
 - SSE events giảm đáng kể → UX mượt hơn, progress bar cập nhật ít lần nhưng có ý nghĩa hơn
 - `sourceInfo` đã bị remove hoàn toàn — nếu cần thêm lại sau, sẽ cần update lại cả chain
+
+---
+
+## Bug Fixes (Phase 2)
+
+### Bug #1: Progress bar bị đứng khi region không có kết quả
+**Root cause:** `crawl()` trả về `provinceCount: 0` khi source không có data → `batchCompleted += 0` → progress không tăng.
+**Fix:** Fallback sang `calculateProvinceCount()` khi `provinceCount === 0` để progress luôn advance.
+
+### Bug #2: Đếm tỉnh trước rồi mới xử lý
+**Fix:** Đã thiết kế từ phase 1 — `batchTotal` được tính tại `enqueue()` dựa trên `getProvincesForDate()`.
+
+### Bug #3: SearchPage - gõ URL trực tiếp không hiện kết quả
+**Root cause:** Backend trả `{ results: [], status: 'crawling' }` + enqueue crawl. Frontend render `EmptyState` ngay.
+**Fix:** 
+- Thêm `refetchInterval: 3000` khi `status === 'crawling'` → tự động poll lại.
+- Khi `results.length === 0 && status === 'crawling'` → hiện `LoadingSkeleton` thay vì `EmptyState`.
+
+### Bug #4: ComparePage - đổi ngày hiện "không có dữ liệu"
+**Root cause:** Tương tự bug #3.
+**Fix:** Tương tự — thêm `refetchInterval`, crawl banner, và loading skeleton.
+
+### Files đã sửa thêm
+| File | Thay đổi |
+|------|--------|
+| `backend/src/services/crawlQueue.ts` | Fallback provinceCount khi = 0, message khi savedCount = 0 |
+| `frontend/src/pages/SearchPage.tsx` | `refetchInterval` khi crawling, loading skeleton thay empty |
+| `frontend/src/pages/ComparePage.tsx` | `refetchInterval` khi crawling, crawl banner, loading skeleton |

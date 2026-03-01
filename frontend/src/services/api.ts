@@ -110,3 +110,12 @@ export function getExportURL(region?: string, days?: number): string {
     return `${API_BASE}/stats/frequency/export?${params.toString()}`;
 }
 
+// Force refresh: delete DB data and re-crawl from source
+export async function refreshData(params: {
+    date?: string;
+    region?: string;
+}): Promise<{ deleted: number; message: string }> {
+    const { data } = await api.post<ApiResponse<{ deleted: number; message: string }>>('/refresh', params);
+    if (!data.success) throw new Error(data.error || 'Refresh thất bại');
+    return data.data!;
+}

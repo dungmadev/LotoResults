@@ -235,6 +235,58 @@ router.post('/crawl', (req: Request, res: Response) => {
     }
 });
 
+// POST /api/refresh — force re-crawl: delete DB data then re-fetch from source
+router.post('/refresh', (req: Request, res: Response) => {
+    try {
+        const { date, region } = req.body as { date?: string; region?: string };
+
+        const targetDate = date || new Date().toISOString().split('T')[0];
+
+        if (!validateDate(targetDate)) {
+            res.status(400).json({ success: false, error: 'Ngày không hợp lệ (YYYY-MM-DD).' });
+            return;
+        }
+
+        // Import getDb and clearByPrefix for force-refresh
+        const { getDb } = require('../db/database');
+        const { clearByPrefix } = require('../services/cache');
+        const db = getDb();
+
+        // Delete existing draws for this date (and optionally region)
+        let deleted: number;
+        if (region && ['mb', 'mt', 'mn'].includes(region)) {
+            const result = db.prepare('DELETE FROM draws WHERE draw_date = ? AND region = ?').run(targetDate, region);
+            deleted = result.changes;
+            // Enqueue single region
+            crawlQueue.enqueue(targetDate, region as Region);
+        } else {
+            const result = db.prepare('DELETE FROM draws WHERE draw_date = ?').run(targetDate);
+            deleted = result.changes;
+            // Enqueue all regions
+            crawlQueue.enqueueAllRegions(targetDate);
+        }
+
+        // Clear all related caches
+        clearByPrefix(`results:${targetDate}`);
+        clearByPrefix('latest:');
+
+        console.log(`🔄 Force refresh: Deleted ${deleted} draws for ${targetDate}${region ? ` (${region})` : ''}, re-crawling...`);
+
+        res.json({
+            success: true,
+            data: {
+                deleted,
+                date: targetDate,
+                region: region || 'all',
+                message: `Đã xóa ${deleted} kết quả cũ và đang tải lại từ nguồn...`,
+            },
+        });
+    } catch (error) {
+        console.error('[POST /api/refresh]', error);
+        res.status(500).json({ success: false, error: 'Refresh thất bại.' });
+    }
+});
+
 // POST /api/backfill — crawl historical results (MB only for now)
 router.post('/backfill', async (req: Request, res: Response) => {
     try {
