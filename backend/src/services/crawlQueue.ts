@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events';
 import { Region } from '../types';
+import { clearByPrefix } from './cache';
 
 // --- Types ---
 
@@ -149,7 +150,12 @@ class CrawlQueue extends EventEmitter {
             nextJob.status = 'done';
             nextJob.completedAt = new Date().toISOString();
 
-            console.log(`[CrawlQueue] ✅ Done: ${nextJob.id}, saved ${savedCount} results`);
+            // Invalidate all cached results for this date so next fetch gets fresh DB data
+            clearByPrefix(`results:${nextJob.date}`);
+            // Also clear "latest" cache since new data may affect latest results
+            clearByPrefix('latest:');
+
+            console.log(`[CrawlQueue] ✅ Done: ${nextJob.id}, saved ${savedCount} results (cache cleared)`);
 
             this.emitEvent({
                 type: 'data-ready',
@@ -232,6 +238,17 @@ class CrawlQueue extends EventEmitter {
             failed: this.queue.filter(j => j.status === 'failed').length,
             jobs: activeJobs,
         };
+    }
+
+    /**
+     * Check if there are any pending or processing jobs for a given date.
+     * Used by getResults to determine if more data is still coming.
+     */
+    hasPendingJobsForDate(date: string): boolean {
+        return this.queue.some(
+            j => j.date === date &&
+                (j.status === 'pending' || j.status === 'processing')
+        );
     }
 
     /**

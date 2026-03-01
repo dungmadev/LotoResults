@@ -63,9 +63,14 @@ export interface GetResultsResponse {
 }
 
 export async function getResults(query: ResultsQuery): Promise<GetResultsResponse> {
-    const cacheKey = resultsCacheKey(query.date || '', query.region, query.province);
-    const cached = getCache<DrawResult[]>(cacheKey);
-    if (cached) return { results: cached, meta: { status: 'ready' } };
+    // Skip cache if there are pending crawl jobs for this date
+    const hasPendingJobs = query.date ? crawlQueue.hasPendingJobsForDate(query.date) : false;
+
+    if (!hasPendingJobs) {
+        const cacheKey = resultsCacheKey(query.date || '', query.region, query.province);
+        const cached = getCache<DrawResult[]>(cacheKey);
+        if (cached) return { results: cached, meta: { status: 'ready' } };
+    }
 
     const db = getDb();
     let sql = `
@@ -94,8 +99,21 @@ export async function getResults(query: ResultsQuery): Promise<GetResultsRespons
     const drawRows = db.prepare(sql).all(...params) as DrawRow[];
     const results = buildDrawResults(drawRows);
 
+    // If crawl jobs are still pending for this date, return partial results + 'crawling' status
+    // Do NOT cache — next request should fetch fresh data from DB
+    if (hasPendingJobs) {
+        return {
+            results,
+            meta: {
+                status: 'crawling',
+                message: 'Đang tải thêm dữ liệu. Kết quả sẽ được cập nhật tự động.',
+            },
+        };
+    }
+
     if (results.length > 0) {
-        // Cache: old dates get long TTL, today gets short TTL
+        // All jobs done — safe to cache
+        const cacheKey = resultsCacheKey(query.date || '', query.region, query.province);
         const today = new Date().toISOString().split('T')[0];
         const ttl = query.date && query.date < today ? OLD_RESULT_TTL : LATEST_RESULT_TTL;
         setCache(cacheKey, results, ttl);
