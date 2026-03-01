@@ -7,6 +7,7 @@ import type { Region, DrawResult } from '../types';
 import ResultTable from '../components/ResultTable';
 import LoadingSkeleton from '../components/LoadingSkeleton';
 import ErrorState, { EmptyState } from '../components/ErrorState';
+import AdvancedSearchOptions, { type SearchFilters } from '../components/AdvancedSearchOptions';
 
 export default function SearchPage() {
     const [searchParams, setSearchParams] = useSearchParams();
@@ -18,6 +19,12 @@ export default function SearchPage() {
     const [debouncedSearch, setDebouncedSearch] = useState('');
     const [searchMode, setSearchMode] = useState<'contains' | 'starts' | 'ends'>('contains');
     const [prizeFilter, setPrizeFilter] = useState('');
+    const [advancedOpen, setAdvancedOpen] = useState(false);
+    const [searchFilters, setSearchFilters] = useState<SearchFilters>({
+        searchType: 'contains',
+        prizeFilter: '',
+        parityFilter: 'all',
+    });
 
     // Debounce search
     useEffect(() => {
@@ -34,7 +41,7 @@ export default function SearchPage() {
 
     // Results query — use search API when number is entered, otherwise use results API
     const {
-        data: results,
+        data: rawResults,
         isLoading,
         isError,
         error,
@@ -180,6 +187,16 @@ export default function SearchPage() {
                     </button>
                 </div>
             </div>
+
+            {/* Advanced Search Options */}
+            {searchNumber && (
+                <AdvancedSearchOptions
+                    filters={searchFilters}
+                    onFiltersChange={setSearchFilters}
+                    isOpen={advancedOpen}
+                    onToggle={() => setAdvancedOpen(!advancedOpen)}
+                />
+            )}
 
             {/* Results */}
             {isLoading ? (

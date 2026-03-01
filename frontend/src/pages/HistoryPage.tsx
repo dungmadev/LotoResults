@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { fetchResults } from '../services/api';
 import { REGION_NAMES } from '../types';
 import type { Region, DrawResult } from '../types';
@@ -20,9 +20,25 @@ function getDatesInRange(days: number): string[] {
 }
 
 export default function HistoryPage() {
-    const [timeRange, setTimeRange] = useState<TimeRange>(7);
-    const [regionFilter, setRegionFilter] = useState<string>('');
+    const [searchParams, setSearchParams] = useSearchParams();
+    
+    // Initialize state from URL params
+    const [timeRange, setTimeRange] = useState<TimeRange>(() => {
+        const rangeParam = searchParams.get('range');
+        return (rangeParam === '7' || rangeParam === '30' || rangeParam === '90') 
+            ? parseInt(rangeParam) as TimeRange 
+            : 7;
+    });
+    const [regionFilter, setRegionFilter] = useState<string>(searchParams.get('region') || '');
     const navigate = useNavigate();
+
+    // Update URL when filters change
+    useEffect(() => {
+        const params = new URLSearchParams();
+        params.set('range', timeRange.toString());
+        if (regionFilter) params.set('region', regionFilter);
+        setSearchParams(params, { replace: true });
+    }, [timeRange, regionFilter, setSearchParams]);
 
     const dates = getDatesInRange(timeRange);
 
