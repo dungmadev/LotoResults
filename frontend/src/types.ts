@@ -37,6 +37,8 @@ export interface ApiResponse<T> {
         source?: string;
         cached?: boolean;
         fetched_at?: string;
+        status?: 'ready' | 'crawling';
+        message?: string;
     };
 }
 

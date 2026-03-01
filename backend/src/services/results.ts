@@ -5,6 +5,7 @@ import {
     resultsCacheKey, latestCacheKey, provincesCacheKey,
     OLD_RESULT_TTL, LATEST_RESULT_TTL, PROVINCE_TTL
 } from './cache';
+import { crawlQueue } from './crawlQueue';
 
 interface DrawRow {
     id: number;
@@ -53,10 +54,23 @@ function buildDrawResults(drawRows: DrawRow[]): DrawResult[] {
     }));
 }
 
-export async function getResults(query: ResultsQuery): Promise<DrawResult[]> {
-    const cacheKey = resultsCacheKey(query.date || '', query.region, query.province);
-    const cached = getCache<DrawResult[]>(cacheKey);
-    if (cached) return cached;
+export interface GetResultsResponse {
+    results: DrawResult[];
+    meta: {
+        status: 'ready' | 'crawling';
+        message?: string;
+    };
+}
+
+export async function getResults(query: ResultsQuery): Promise<GetResultsResponse> {
+    // Skip cache if there are pending crawl jobs for this date
+    const hasPendingJobs = query.date ? crawlQueue.hasPendingJobsForDate(query.date) : false;
+
+    if (!hasPendingJobs) {
+        const cacheKey = resultsCacheKey(query.date || '', query.region, query.province);
+        const cached = getCache<DrawResult[]>(cacheKey);
+        if (cached) return { results: cached, meta: { status: 'ready' } };
+    }
 
     const db = getDb();
     let sql = `
@@ -83,36 +97,46 @@ export async function getResults(query: ResultsQuery): Promise<DrawResult[]> {
     sql += ' ORDER BY d.draw_date DESC, d.region, d.province_id';
 
     const drawRows = db.prepare(sql).all(...params) as DrawRow[];
+    const results = buildDrawResults(drawRows);
 
-    // Autocrawl if requesting a specific date + region but we have no results yet
-    let results = buildDrawResults(drawRows);
-    if (results.length === 0 && query.date) {
-        // Try crawling
-        const regionsToCrawl: Region[] = query.region ? [query.region as Region] : ['mb', 'mt', 'mn'];
-        let newDrawsSaved = 0;
-
-        try {
-            const { crawl } = await import('../crawler/crawler');
-            for (const r of regionsToCrawl) {
-                newDrawsSaved += await crawl(query.date, r);
-            }
-        } catch (error) {
-            console.error('[getResults] Auto-crawl failed:', error);
-        }
-
-        // Re-query if we saved anything
-        if (newDrawsSaved > 0) {
-            const reRow = db.prepare(sql).all(...params) as DrawRow[];
-            results = buildDrawResults(reRow);
-        }
+    // If crawl jobs are still pending for this date, return partial results + 'crawling' status
+    // Do NOT cache — next request should fetch fresh data from DB
+    if (hasPendingJobs) {
+        return {
+            results,
+            meta: {
+                status: 'crawling',
+                message: 'Đang tải thêm dữ liệu. Kết quả sẽ được cập nhật tự động.',
+            },
+        };
     }
 
-    // Cache: old dates get long TTL, today gets short TTL
-    const today = new Date().toISOString().split('T')[0];
-    const ttl = query.date && query.date < today ? OLD_RESULT_TTL : LATEST_RESULT_TTL;
-    setCache(cacheKey, results, ttl);
+    if (results.length > 0) {
+        // All jobs done — safe to cache
+        const cacheKey = resultsCacheKey(query.date || '', query.region, query.province);
+        const today = new Date().toISOString().split('T')[0];
+        const ttl = query.date && query.date < today ? OLD_RESULT_TTL : LATEST_RESULT_TTL;
+        setCache(cacheKey, results, ttl);
+        return { results, meta: { status: 'ready' } };
+    }
 
-    return results;
+    // No data found — enqueue crawl jobs (non-blocking)
+    if (query.date) {
+        const regionsToCrawl: Region[] = query.region ? [query.region] : ['mb', 'mt', 'mn'];
+        for (const r of regionsToCrawl) {
+            crawlQueue.enqueue(query.date, r);
+        }
+
+        return {
+            results: [],
+            meta: {
+                status: 'crawling',
+                message: 'Đang tải dữ liệu từ nguồn. Kết quả sẽ được cập nhật tự động.',
+            },
+        };
+    }
+
+    return { results: [], meta: { status: 'ready' } };
 }
 
 export function getLatestResults(query: LatestQuery): DrawResult[] {

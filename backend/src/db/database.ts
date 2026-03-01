@@ -8,22 +8,22 @@ const DB_PATH = path.join(DB_DIR, 'xoso.db');
 let db: Database.Database;
 
 export function getDb(): Database.Database {
-    if (!db) {
-        // Ensure data directory exists
-        if (!fs.existsSync(DB_DIR)) {
-            fs.mkdirSync(DB_DIR, { recursive: true });
-        }
-        db = new Database(DB_PATH);
-        db.pragma('journal_mode = WAL');
-        db.pragma('foreign_keys = ON');
+  if (!db) {
+    // Ensure data directory exists
+    if (!fs.existsSync(DB_DIR)) {
+      fs.mkdirSync(DB_DIR, { recursive: true });
     }
-    return db;
+    db = new Database(DB_PATH);
+    db.pragma('journal_mode = WAL');
+    db.pragma('foreign_keys = ON');
+  }
+  return db;
 }
 
 export function initializeDb(): void {
-    const database = getDb();
+  const database = getDb();
 
-    database.exec(`
+  database.exec(`
     CREATE TABLE IF NOT EXISTS provinces (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -60,11 +60,24 @@ export function initializeDb(): void {
     CREATE INDEX IF NOT EXISTS idx_prizes_draw ON prizes(draw_id);
   `);
 
-    console.log('✅ Database initialized successfully');
+  // --- Migrations: add columns that may not exist in older DBs ---
+  const columns = database.prepare("PRAGMA table_info('provinces')").all() as { name: string }[];
+  const columnNames = columns.map(c => c.name);
+
+  if (!columnNames.includes('draw_time')) {
+    database.exec("ALTER TABLE provinces ADD COLUMN draw_time TEXT DEFAULT '18:00'");
+    console.log('🔄 Migration: Added draw_time column to provinces');
+  }
+  if (!columnNames.includes('active')) {
+    database.exec("ALTER TABLE provinces ADD COLUMN active INTEGER DEFAULT 1");
+    console.log('🔄 Migration: Added active column to provinces');
+  }
+
+  console.log('✅ Database initialized successfully');
 }
 
 export function closeDb(): void {
-    if (db) {
-        db.close();
-    }
+  if (db) {
+    db.close();
+  }
 }

@@ -4,6 +4,8 @@ import type { SearchMode } from '../services/results';
 import { getFrequencyStats, getHotColdNumbers, exportFrequencyCSV } from '../services/statistics';
 import { validateDate, validateRegion } from '../middleware';
 import { ResultsQuery, LatestQuery, Region, ApiResponse, DrawResult, Province } from '../types';
+import { crawlQueue } from '../services/crawlQueue';
+import { sseManager } from '../services/sseManager';
 
 const router = Router();
 
@@ -34,15 +36,17 @@ router.get('/results', async (req: Request, res: Response) => {
             province: province as string | undefined,
         };
 
-        const results = await getResults(query);
+        const { results, meta: crawlMeta } = await getResults(query);
 
         res.json({
             success: true,
             data: results,
             meta: {
                 total: results.length,
+                status: crawlMeta.status,
+                message: crawlMeta.message,
             },
-        } as ApiResponse<DrawResult[]>);
+        });
     } catch (error) {
         console.error('[GET /api/results]', error);
         res.status(500).json({
@@ -180,8 +184,29 @@ router.get('/search', (req: Request, res: Response) => {
     }
 });
 
-// POST /api/crawl — crawl results for a specific date and region
-router.post('/crawl', async (req: Request, res: Response) => {
+// SSE endpoint — real-time event stream for Frontend
+router.get('/events', (req: Request, res: Response) => {
+    // Disable request timeout for SSE
+    req.setTimeout(0);
+    sseManager.addClient(res);
+});
+
+// GET /api/queue/status — check crawl queue status
+router.get('/queue/status', (_req: Request, res: Response) => {
+    try {
+        const status = crawlQueue.getStatus();
+        res.json({
+            success: true,
+            data: status,
+        });
+    } catch (error) {
+        console.error('[GET /api/queue/status]', error);
+        res.status(500).json({ success: false, error: 'Không thể lấy trạng thái hàng đợi.' });
+    }
+});
+
+// POST /api/crawl — enqueue crawl request (non-blocking)
+router.post('/crawl', (req: Request, res: Response) => {
     try {
         const { date, region } = req.body as { date?: string; region?: string };
 
@@ -191,16 +216,74 @@ router.post('/crawl', async (req: Request, res: Response) => {
         }
         const validRegion = (region && ['mb', 'mt', 'mn'].includes(region)) ? region as Region : 'mb';
 
-        const { crawl: doCrawl } = await import('../crawler/crawler');
-        const saved = await doCrawl(date, validRegion);
+        const result = crawlQueue.enqueue(date, validRegion);
 
         res.json({
             success: true,
-            data: { saved, date, region: validRegion },
+            data: {
+                enqueued: result.enqueued,
+                jobId: result.jobId,
+                reason: result.reason,
+                message: result.enqueued
+                    ? `Đã thêm vào hàng đợi: ${validRegion.toUpperCase()} ngày ${date}`
+                    : result.reason,
+            },
         });
     } catch (error) {
         console.error('[POST /api/crawl]', error);
         res.status(500).json({ success: false, error: 'Crawl thất bại.' });
+    }
+});
+
+// POST /api/refresh — force re-crawl: delete DB data then re-fetch from source
+router.post('/refresh', (req: Request, res: Response) => {
+    try {
+        const { date, region } = req.body as { date?: string; region?: string };
+
+        const targetDate = date || new Date().toISOString().split('T')[0];
+
+        if (!validateDate(targetDate)) {
+            res.status(400).json({ success: false, error: 'Ngày không hợp lệ (YYYY-MM-DD).' });
+            return;
+        }
+
+        // Import getDb and clearByPrefix for force-refresh
+        const { getDb } = require('../db/database');
+        const { clearByPrefix } = require('../services/cache');
+        const db = getDb();
+
+        // Delete existing draws for this date (and optionally region)
+        let deleted: number;
+        if (region && ['mb', 'mt', 'mn'].includes(region)) {
+            const result = db.prepare('DELETE FROM draws WHERE draw_date = ? AND region = ?').run(targetDate, region);
+            deleted = result.changes;
+            // Enqueue single region
+            crawlQueue.enqueue(targetDate, region as Region);
+        } else {
+            const result = db.prepare('DELETE FROM draws WHERE draw_date = ?').run(targetDate);
+            deleted = result.changes;
+            // Enqueue all regions
+            crawlQueue.enqueueAllRegions(targetDate);
+        }
+
+        // Clear all related caches
+        clearByPrefix(`results:${targetDate}`);
+        clearByPrefix('latest:');
+
+        console.log(`🔄 Force refresh: Deleted ${deleted} draws for ${targetDate}${region ? ` (${region})` : ''}, re-crawling...`);
+
+        res.json({
+            success: true,
+            data: {
+                deleted,
+                date: targetDate,
+                region: region || 'all',
+                message: `Đã xóa ${deleted} kết quả cũ và đang tải lại từ nguồn...`,
+            },
+        });
+    } catch (error) {
+        console.error('[POST /api/refresh]', error);
+        res.status(500).json({ success: false, error: 'Refresh thất bại.' });
     }
 });
 

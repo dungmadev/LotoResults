@@ -1,32 +1,63 @@
-import axios from 'axios';
+import axios, { CancelTokenSource } from 'axios';
 import * as cheerio from 'cheerio';
 import { getDb } from '../db/database';
-import { CrawlSource, Region } from '../types';
+import { Region, EXPECTED_PRIZE_COUNT } from '../types';
 import { findProvinceId } from '../utils/provinces';
 import crypto from 'crypto';
+import {
+    logCrawl,
+    type CrawledResult,
+    padNumber,
+    countPrizeNumbers,
+    countProvincePrizeNumbers,
+    getRandomUserAgent,
+} from './crawlerUtils';
+import { buildMinhNgocUrl, parseMinhNgocMB, parseMinhNgocMTMN } from './parseMinhNgoc';
+import { buildXSKTUrl, parseXSKTMB, parseXSKTMTMN } from './parseXSKT';
 
-// Crawler sources configuration
-const SOURCES: CrawlSource[] = [
-    { name: 'xoso.com.vn', baseUrl: 'https://xoso.com.vn', priority: 1 },
+// --- Source Configuration ---
+
+interface SourceConfig {
+    name: string;
+    buildUrl: (date: string, region: Region) => string;
+    /** Regions this source supports. If omitted, supports all. */
+    supportedRegions?: Region[];
+    parseMB: (html: string, date: string) => CrawledResult[];
+    parseMTMN: (html: string, date: string, region: Region) => CrawledResult[];
+}
+
+const SOURCES: SourceConfig[] = [
+    {
+        name: 'xoso.com.vn',
+        buildUrl: buildXosoUrl,
+        parseMB: parseXosoComVnMB,
+        parseMTMN: parseXosoComVnMTMN,
+    },
+    {
+        name: 'xskt.com.vn',
+        buildUrl: buildXSKTUrl,
+        parseMB: parseXSKTMB,
+        parseMTMN: parseXSKTMTMN,
+    },
+    {
+        // Deprioritized: minhngoc frequently returns empty/blocked responses
+        name: 'minhngoc.net.vn',
+        buildUrl: buildMinhNgocUrl,
+        parseMB: parseMinhNgocMB,
+        parseMTMN: parseMinhNgocMTMN,
+    },
 ];
 
-interface CrawledResult {
-    draw_date: string;
-    region: Region;
-    province_id: string;
-    prizes: { prize_code: string; numbers: string[] }[];
+// --- Crawl Result Type ---
+
+export interface CrawlResult {
+    savedCount: number;
+    provinceCount: number;
+    provinceNames: string[];
+    sourceName: string;
 }
 
-// Log utility
-function logCrawl(level: 'INFO' | 'WARN' | 'ERROR', message: string, meta?: unknown): void {
-    const timestamp = new Date().toISOString();
-    const logEntry = `[${timestamp}] [CRAWLER] [${level}] ${message}`;
-    if (meta) {
-        console.log(logEntry, JSON.stringify(meta));
-    } else {
-        console.log(logEntry);
-    }
-}
+// --- xoso.com.vn URL Builder (existing source) ---
 
 /**
  * Build URL for xoso.com.vn
@@ -34,34 +65,19 @@ function logCrawl(level: 'INFO' | 'WARN' | 'ERROR', message: string, meta?: unkn
  * MT: /xsmt-DD-MM-YYYY.html
  * MN: /xsmn-DD-MM-YYYY.html
  */
-function buildXosoUrl(baseUrl: string, date: string, region: Region): string {
+function buildXosoUrl(date: string, region: Region): string {
     const [y, m, d] = date.split('-');
     const regionSlug = region === 'mb' ? 'xsmb' : region === 'mt' ? 'xsmt' : 'xsmn';
-    return `${baseUrl}/${regionSlug}-${d}-${m}-${y}.html`;
+    return `https://xoso.com.vn/${regionSlug}-${d}-${m}-${y}.html`;
 }
 
 // Prize code mapping from row index (0-indexed after header) to our prize codes
 const MB_PRIZE_MAP: Record<number, string> = {
-    0: 'db', // Giải ĐB
-    1: 'g1',
-    2: 'g2',
-    3: 'g3',
-    4: 'g4',
-    5: 'g5',
-    6: 'g6',
-    7: 'g7',
+    0: 'db', 1: 'g1', 2: 'g2', 3: 'g3', 4: 'g4', 5: 'g5', 6: 'g6', 7: 'g7',
 };
 
 const MT_MN_PRIZE_MAP: Record<number, string> = {
-    0: 'g8',
-    1: 'g7',
-    2: 'g6',
-    3: 'g5',
-    4: 'g4',
-    5: 'g3',
-    6: 'g2',
-    7: 'g1',
-    8: 'db',
+    0: 'g8', 1: 'g7', 2: 'g6', 3: 'g5', 4: 'g4', 5: 'g3', 6: 'g2', 7: 'g1', 8: 'db',
 };
 
 /**
@@ -98,18 +114,7 @@ export function parseXosoComVnMB(html: string, date: string): CrawledResult[] {
             const numbers = numbersText.split(/\s+/).filter(n => /^\d+$/.test(n));
 
             if (numbers.length > 0) {
-                // Pad numbers according to prize digit requirements
-                const padded = numbers.map(n => {
-                    if (prizeCode === 'db') return n.padStart(5, '0');
-                    if (prizeCode === 'g1') return n.padStart(5, '0');
-                    if (prizeCode === 'g2') return n.padStart(5, '0');
-                    if (prizeCode === 'g3') return n.padStart(5, '0');
-                    if (prizeCode === 'g4') return n.padStart(4, '0');
-                    if (prizeCode === 'g5') return n.padStart(4, '0');
-                    if (prizeCode === 'g6') return n.padStart(3, '0');
-                    if (prizeCode === 'g7') return n.padStart(2, '0');
-                    return n;
-                });
+                const padded = numbers.map(n => padNumber(n, prizeCode, 'mb'));
                 prizes.push({ prize_code: prizeCode, numbers: padded });
             }
         });
@@ -143,21 +148,17 @@ export function parseXosoComVnMTMN(html: string, date: string, region: Region): 
         const $ = cheerio.load(html);
         const results: CrawledResult[] = [];
 
-        // MT/MN pages may have multiple tables for different regions/days, but usually just one main table.
-        // The table columns represent different provinces on the same day.
         $('table.table-result').each((_idx, tbl) => {
             const rows = $(tbl).find('tr');
-            if (rows.length < 9) return; // Need at least header + 8/9 prize rows
+            if (rows.length < 9) return;
 
-            // First row (index 0) is header: <th>G</th> <th>Province 1</th> <th>Province 2</th> ...
             const headers = rows.eq(0).find('th');
             if (headers.length < 2) return;
 
-            // Extract province IDs from headers
             const provinceColumns: { colIndex: number; provinceId: string }[] = [];
             headers.each((colIdx, th) => {
                 const text = $(th).text().trim();
-                if (colIdx > 0 && text.length > 0) { // Skip first column ("G")
+                if (colIdx > 0 && text.length > 0) {
                     const pid = findProvinceId(text, region);
                     if (pid) {
                         provinceColumns.push({ colIndex: colIdx, provinceId: pid });
@@ -165,47 +166,33 @@ export function parseXosoComVnMTMN(html: string, date: string, region: Region): 
                 }
             });
 
-            // Initialize prizes array for each province
             const provincePrizes: Record<string, { prize_code: string; numbers: string[] }[]> = {};
             for (const pc of provinceColumns) {
                 provincePrizes[pc.provinceId] = [];
             }
 
-            // Parse each prize row (starting from index 1)
             rows.each((i, tr) => {
-                if (i === 0) return; // Skip header
+                if (i === 0) return;
 
                 const tds = $(tr).find('td');
-                if (tds.length < provinceColumns.length) return; // Ignore malformed rows
+                if (tds.length < provinceColumns.length) return;
 
-                const prizeCode = MT_MN_PRIZE_MAP[i - 1]; // Row 1 -> G8, Row 2 -> G7, ...
+                const prizeCode = MT_MN_PRIZE_MAP[i - 1];
                 if (!prizeCode) return;
 
-                // For each province column
                 for (let c = 0; c < provinceColumns.length; c++) {
                     const colInfo = provinceColumns[c];
-                    // The first <td> in MT/MN table rows might be the column headers too, but actually `cells` just has the numbers.
-                    // Let's rely on the crawler output: Row 1: [ '08', '00', '95' ] -> length 3 (matches 3 provinces).
-                    // So cell index corresponds to province index (since the 'G' column uses <th> or we skip it).
                     const td = tds.eq(c);
                     const numbersText = td.text().trim();
                     const numbers = numbersText.split(/\s+/).filter((n: string) => /^\d+$/.test(n));
 
                     if (numbers.length > 0) {
-                        const padded = numbers.map((n: string) => {
-                            if (prizeCode === 'db') return n.padStart(6, '0');
-                            if (['g1', 'g2', 'g3', 'g4'].includes(prizeCode)) return n.padStart(5, '0');
-                            if (['g5', 'g6'].includes(prizeCode)) return n.padStart(4, '0');
-                            if (prizeCode === 'g7') return n.padStart(3, '0');
-                            if (prizeCode === 'g8') return n.padStart(2, '0');
-                            return n;
-                        });
+                        const padded = numbers.map((n: string) => padNumber(n, prizeCode, region));
                         provincePrizes[colInfo.provinceId].push({ prize_code: prizeCode, numbers: padded });
                     }
                 }
             });
 
-            // Push to final results
             for (const pc of provinceColumns) {
                 if (provincePrizes[pc.provinceId].length > 0) {
                     results.push({
@@ -261,6 +248,8 @@ export function computeChecksum(result: CrawledResult): string {
 }
 
 // Save crawled results to database
+// Each province is saved individually — if one fails (e.g., unknown province_id
+// causing FOREIGN KEY violation), the rest are still saved successfully.
 export function saveCrawledResults(results: CrawledResult[], sourceName: string): number {
     const db = getDb();
     let savedCount = 0;
@@ -279,92 +268,214 @@ export function saveCrawledResults(results: CrawledResult[], sourceName: string)
         'INSERT INTO prizes (draw_id, prize_code, numbers) VALUES (?, ?, ?)'
     );
 
-    const saveAll = db.transaction(() => {
-        for (const result of results) {
-            const checksum = computeChecksum(result);
-            const existing = checkExisting.get(result.draw_date, result.province_id) as any;
+    // Save each province in its own mini-transaction
+    // so a failure in one province doesn't rollback others
+    const saveOne = db.transaction((result: CrawledResult) => {
+        const checksum = computeChecksum(result);
+        const existing = checkExisting.get(result.draw_date, result.province_id) as any;
 
-            let drawId: number;
+        let drawId: number;
 
-            if (existing) {
-                if (existing.checksum === checksum) {
-                    logCrawl('INFO', `No changes detected for ${result.province_id} on ${result.draw_date}`);
-                    continue;
-                }
-                updateDraw.run(sourceName, new Date().toISOString(), checksum, existing.id);
-                deletePrizes.run(existing.id);
-                drawId = existing.id;
-                logCrawl('INFO', `Updated draw ${result.province_id} on ${result.draw_date}`);
-            } else {
-                const res = insertDraw.run(
-                    result.draw_date, result.region, result.province_id,
-                    sourceName, new Date().toISOString(), checksum
-                );
-                drawId = Number(res.lastInsertRowid);
-                logCrawl('INFO', `New draw saved: ${result.province_id} on ${result.draw_date}`);
+        if (existing) {
+            if (existing.checksum === checksum) {
+                logCrawl('INFO', `No changes detected for ${result.province_id} on ${result.draw_date}`);
+                return false; // Not saved (no change)
             }
-
-            for (const prize of result.prizes) {
-                insertPrize.run(drawId, prize.prize_code, JSON.stringify(prize.numbers));
-            }
-            savedCount++;
+            updateDraw.run(sourceName, new Date().toISOString(), checksum, existing.id);
+            drawId = existing.id;
+            logCrawl('INFO', `Updated draw ${result.province_id} on ${result.draw_date}`);
+        } else {
+            const res = insertDraw.run(
+                result.draw_date, result.region, result.province_id,
+                sourceName, new Date().toISOString(), checksum
+            );
+            drawId = Number(res.lastInsertRowid);
+            logCrawl('INFO', `New draw saved: ${result.province_id} on ${result.draw_date}`);
         }
+
+        // Always delete old prizes before inserting new ones
+        // (prevents duplicates from seed data or previous partial saves)
+        deletePrizes.run(drawId);
+
+        for (const prize of result.prizes) {
+            insertPrize.run(drawId, prize.prize_code, JSON.stringify(prize.numbers));
+        }
+        return true; // Saved successfully
     });
 
-    saveAll();
-    return savedCount;
-}
-
-// Main crawl function
-export async function crawl(date: string, region: Region): Promise<number> {
-    logCrawl('INFO', `Starting crawl for ${region} on ${date}`);
-
-    for (const source of SOURCES) {
+    for (const result of results) {
         try {
-            logCrawl('INFO', `Trying source: ${source.name}`);
-
-            const url = buildXosoUrl(source.baseUrl, date, region);
-            logCrawl('INFO', `Fetching: ${url}`);
-
-            const response = await axios.get(url, {
-                timeout: 15000,
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                },
-            });
-
-            if (response.status !== 200) {
-                throw new Error(`HTTP ${response.status}`);
-            }
-
-            // Parse based on region
-            let rawResults: CrawledResult[];
-            if (region === 'mb') {
-                rawResults = parseXosoComVnMB(response.data, date);
-            } else {
-                rawResults = parseXosoComVnMTMN(response.data, date, region);
-            }
-
-            const normalized = normalizeResults(rawResults);
-
-            if (normalized.length === 0) {
-                logCrawl('WARN', `No valid results parsed from ${source.name}`);
-                continue;
-            }
-
-            const saved = saveCrawledResults(normalized, source.name);
-            logCrawl('INFO', `Successfully saved ${saved} results from ${source.name}`);
-            return saved;
-
+            const saved = saveOne(result);
+            if (saved) savedCount++;
         } catch (error) {
-            logCrawl('ERROR', `Source ${source.name} failed`, {
-                error: (error as Error).message,
-            });
+            // Log and skip this province — don't break the rest
+            logCrawl('WARN', `Failed to save ${result.province_id} on ${result.draw_date}: ${(error as Error).message}`);
         }
     }
 
-    logCrawl('ERROR', `All sources failed for ${region} on ${date}`);
-    return 0;
+    return savedCount;
+}
+
+// --- Race & Fallback Mechanism ---
+
+/**
+ * Validate if results are "sufficient" — all provinces have enough prize numbers.
+ * A result is sufficient when each province has at least EXPECTED_PRIZE_COUNT numbers.
+ */
+function isResultSufficient(results: CrawledResult[], region: Region): boolean {
+    if (results.length === 0) return false;
+
+    const expectedCount = EXPECTED_PRIZE_COUNT[region];
+
+    // For MB: exactly 1 province = hanoi
+    if (region === 'mb') {
+        return results.length >= 1 && countProvincePrizeNumbers(results[0]) >= expectedCount;
+    }
+
+    // For MT/MN: at least 1 province with sufficient data
+    return results.some(r => countProvincePrizeNumbers(r) >= expectedCount);
+}
+
+/**
+ * Fetch and parse data from a single source with AbortController support.
+ * Returns parsed results if sufficient, otherwise throws.
+ */
+async function fetchFromSource(
+    source: SourceConfig,
+    date: string,
+    region: Region,
+    cancelToken: CancelTokenSource,
+): Promise<{ results: CrawledResult[]; sourceName: string }> {
+    // Check if source supports this region
+    if (source.supportedRegions && !source.supportedRegions.includes(region)) {
+        throw new Error(`Source ${source.name} does not support region ${region}`);
+    }
+
+    const url = source.buildUrl(date, region);
+    logCrawl('INFO', `[Race] Fetching from ${source.name}: ${url}`);
+
+    try {
+        const response = await axios.get(url, {
+            timeout: 15000,
+            cancelToken: cancelToken.token,
+            headers: {
+                'User-Agent': getRandomUserAgent(),
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
+            },
+        });
+
+        if (response.status !== 200) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+
+        // Parse response
+
+        // Parse based on region
+        let rawResults: CrawledResult[];
+        if (region === 'mb') {
+            rawResults = source.parseMB(response.data, date);
+        } else {
+            rawResults = source.parseMTMN(response.data, date, region);
+        }
+
+        const normalized = normalizeResults(rawResults);
+
+        // Validate sufficiency
+        if (!isResultSufficient(normalized, region)) {
+            const total = countPrizeNumbers(normalized);
+            const expected = EXPECTED_PRIZE_COUNT[region];
+            logCrawl('WARN', `[Race] ${source.name} returned insufficient data (${total} numbers, expected ≥${expected})`);
+            throw new Error(`Insufficient data from ${source.name}: got ${total} numbers, expected ≥${expected}`);
+        }
+
+        const total = countPrizeNumbers(normalized);
+        logCrawl('INFO', `[Race] ✅ ${source.name} returned sufficient data (${total} numbers)`);
+        logCrawl('INFO', `[Race] ✅ ${source.name} — ${normalized.length} province(s) parsed`);
+
+        return { results: normalized, sourceName: source.name };
+    } catch (error) {
+        if (axios.isCancel(error)) {
+            logCrawl('INFO', `[Race] ⚡ ${source.name} aborted (another source won the race)`);
+            throw error; // Re-throw cancel to respect Promise.any semantics
+        }
+        // Source failed — let Promise.any try others
+        logCrawl('WARN', `[Race] ❌ ${source.name} failed: ${(error as Error).message}`);
+        throw error;
+    }
+}
+
+/**
+ * Main crawl function — Race & Fallback using Promise.any + AbortController.
+ *
+ * 1. Fetch from all sources concurrently
+ * 2. First source to return "sufficient" data wins
+ * 3. Cancel remaining requests immediately
+ *
+ * @returns CrawlResult with savedCount, provinceCount, provinceNames, sourceName
+ */
+export async function crawl(
+    date: string,
+    region: Region,
+): Promise<CrawlResult> {
+    logCrawl('INFO', `Starting crawl for ${region} on ${date} (Race & Fallback, ${SOURCES.length} sources)`);
+
+    // Filter sources that support this region
+    const activeSources = SOURCES.filter(
+        s => !s.supportedRegions || s.supportedRegions.includes(region)
+    );
+
+    if (activeSources.length === 0) {
+        logCrawl('ERROR', `No sources available for ${region}`);
+        return { savedCount: 0, provinceCount: 0, provinceNames: [], sourceName: '' };
+    }
+
+    // Create a CancelTokenSource per source for independent cancellation
+    const cancelTokens: CancelTokenSource[] = activeSources.map(() => axios.CancelToken.source());
+
+    try {
+        // Race all sources — first to return sufficient data wins
+        const { results, sourceName } = await Promise.any(
+            activeSources.map((source, index) =>
+                fetchFromSource(source, date, region, cancelTokens[index])
+            )
+        );
+
+        // Cancel all remaining sources
+        logCrawl('INFO', `[Race] 🏆 Winner: ${sourceName} — Cancelling ${activeSources.length - 1} remaining sources`);
+        for (const token of cancelTokens) {
+            token.cancel(`Race won by ${sourceName}`);
+        }
+
+        // Save to database
+        const saved = saveCrawledResults(results, sourceName);
+
+        // Extract province info from results
+        const { PROVINCES } = await import('../utils/provinces');
+        const provinceNames = results.map(r => {
+            const province = PROVINCES.find(p => p.id === r.province_id);
+            return province?.name || r.province_id;
+        });
+
+        logCrawl('INFO', `Successfully saved ${saved} results (${results.length} provinces) from ${sourceName}`);
+
+        return {
+            savedCount: saved,
+            provinceCount: results.length,
+            provinceNames,
+            sourceName,
+        };
+
+    } catch (error: unknown) {
+        // All sources failed — AggregateError from Promise.any
+        if (error instanceof AggregateError) {
+            const errors = error.errors.map((e: unknown) => (e instanceof Error ? e.message : String(e))).join('; ');
+            logCrawl('ERROR', `[Race] All ${activeSources.length} sources failed for ${region} on ${date}: ${errors}`);
+        } else {
+            logCrawl('ERROR', `[Race] Unexpected error: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        return { savedCount: 0, provinceCount: 0, provinceNames: [], sourceName: '' };
+    }
 }
 
 /**
@@ -380,8 +491,8 @@ export async function crawlBackfill(days: number = 30): Promise<number> {
         const dateStr = date.toISOString().split('T')[0];
 
         try {
-            const saved = await crawl(dateStr, 'mb');
-            totalSaved += saved;
+            const result = await crawl(dateStr, 'mb');
+            totalSaved += result.savedCount;
 
             // Rate limit: wait 500ms between requests
             if (i < days - 1) {

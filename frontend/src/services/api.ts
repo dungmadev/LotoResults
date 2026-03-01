@@ -32,14 +32,28 @@ const api = axios.create({
     timeout: 10000,
 });
 
+export interface FetchResultsResponse {
+    results: DrawResult[];
+    meta: {
+        status: 'ready' | 'crawling';
+        message?: string;
+    };
+}
+
 export async function fetchResults(params: {
     date?: string;
     region?: string;
     province?: string;
-}): Promise<DrawResult[]> {
+}): Promise<FetchResultsResponse> {
     const { data } = await api.get<ApiResponse<DrawResult[]>>('/results', { params });
     if (!data.success) throw new Error(data.error || 'Lỗi không xác định');
-    return data.data || [];
+    return {
+        results: data.data || [],
+        meta: {
+            status: data.meta?.status || 'ready',
+            message: data.meta?.message,
+        },
+    };
 }
 
 export async function fetchLatestResults(params: {
@@ -96,3 +110,12 @@ export function getExportURL(region?: string, days?: number): string {
     return `${API_BASE}/stats/frequency/export?${params.toString()}`;
 }
 
+// Force refresh: delete DB data and re-crawl from source
+export async function refreshData(params: {
+    date?: string;
+    region?: string;
+}): Promise<{ deleted: number; message: string }> {
+    const { data } = await api.post<ApiResponse<{ deleted: number; message: string }>>('/refresh', params);
+    if (!data.success) throw new Error(data.error || 'Refresh thất bại');
+    return data.data!;
+}
