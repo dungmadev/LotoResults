@@ -5,6 +5,7 @@ import Navbar from './components/Navbar';
 import Dashboard from './pages/Dashboard';
 import SearchPage from './pages/SearchPage';
 import HistoryPage from './pages/HistoryPage';
+import ComparePage from './pages/ComparePage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -25,6 +26,8 @@ function App() {
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/search" element={<SearchPage />} />
+            <Route path="/results" element={<SearchPage />} />
+            <Route path="/compare" element={<ComparePage />} />
             <Route path="/history" element={<HistoryPage />} />
           </Routes>
         </BrowserRouter>

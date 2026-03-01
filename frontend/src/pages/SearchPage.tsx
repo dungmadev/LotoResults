@@ -1,8 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { useState, useEffect } from 'react';
-import { fetchResults, fetchProvinces } from '../services/api';
-import { REGION_NAMES } from '../types';
+import { fetchResults, fetchProvinces, searchByNumber } from '../services/api';
+import { REGION_NAMES, PRIZE_NAMES } from '../types';
 import type { Region, DrawResult } from '../types';
 import ResultTable from '../components/ResultTable';
 import LoadingSkeleton from '../components/LoadingSkeleton';
@@ -16,6 +16,8 @@ export default function SearchPage() {
     const [province, setProvince] = useState<string>(searchParams.get('province') || '');
     const [searchNumber, setSearchNumber] = useState('');
     const [debouncedSearch, setDebouncedSearch] = useState('');
+    const [searchMode, setSearchMode] = useState<'contains' | 'starts' | 'ends'>('contains');
+    const [prizeFilter, setPrizeFilter] = useState('');
 
     // Debounce search
     useEffect(() => {
@@ -30,7 +32,7 @@ export default function SearchPage() {
         staleTime: 1000 * 60 * 60,
     });
 
-    // Results query
+    // Results query — use search API when number is entered, otherwise use results API
     const {
         data: results,
         isLoading,
@@ -38,16 +40,26 @@ export default function SearchPage() {
         error,
         refetch,
     } = useQuery({
-        queryKey: ['results', date, region, province],
-        queryFn: () => fetchResults({
-            date: date || undefined,
-            region: region || undefined,
-            province: province || undefined,
-        }),
+        queryKey: debouncedSearch
+            ? ['search', debouncedSearch, date, region, searchMode, prizeFilter]
+            : ['results', date, region, province],
+        queryFn: () => debouncedSearch
+            ? searchByNumber({
+                number: debouncedSearch,
+                date: date || undefined,
+                region: region || undefined,
+                mode: searchMode,
+                prize_code: prizeFilter || undefined,
+            })
+            : fetchResults({
+                date: date || undefined,
+                region: region || undefined,
+                province: province || undefined,
+            }),
         staleTime: 1000 * 60 * 2,
     });
 
-    // Sync URL params from event handlers
+    // Sync URL with explicit named query params
     const syncParams = (overrides: { date?: string; region?: string; province?: string } = {}) => {
         const params = new URLSearchParams();
         const d = overrides.date ?? date;
@@ -133,6 +145,33 @@ export default function SearchPage() {
                         maxLength={6}
                         style={{ fontFamily: 'var(--font-mono)', letterSpacing: '1px' }}
                     />
+                </div>
+
+                <div className="filter-group">
+                    <label className="filter-label">Kiểu tìm</label>
+                    <select
+                        className="filter-select"
+                        value={searchMode}
+                        onChange={(e) => setSearchMode(e.target.value as 'contains' | 'starts' | 'ends')}
+                    >
+                        <option value="contains">Chứa số</option>
+                        <option value="starts">Bắt đầu bằng</option>
+                        <option value="ends">Kết thúc bằng</option>
+                    </select>
+                </div>
+
+                <div className="filter-group">
+                    <label className="filter-label">Lọc giải</label>
+                    <select
+                        className="filter-select"
+                        value={prizeFilter}
+                        onChange={(e) => setPrizeFilter(e.target.value)}
+                    >
+                        <option value="">Tất cả giải</option>
+                        {Object.entries(PRIZE_NAMES).map(([code, name]) => (
+                            <option key={code} value={code}>{name}</option>
+                        ))}
+                    </select>
                 </div>
 
                 <div className="filter-group" style={{ alignSelf: 'flex-end' }}>

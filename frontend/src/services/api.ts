@@ -39,6 +39,8 @@ export async function searchByNumber(params: {
     number: string;
     date?: string;
     region?: string;
+    mode?: 'contains' | 'starts' | 'ends';
+    prize_code?: string;
 }): Promise<DrawResult[]> {
     const { data } = await api.get<ApiResponse<DrawResult[]>>('/search', { params });
     if (!data.success) throw new Error(data.error || 'Lỗi không xác định');

@@ -1,12 +1,13 @@
 import { Router, Request, Response } from 'express';
 import { getResults, getLatestResults, getProvinces, searchByNumber } from '../services/results';
+import type { SearchMode } from '../services/results';
 import { validateDate, validateRegion } from '../middleware';
 import { ResultsQuery, LatestQuery, Region, ApiResponse, DrawResult, Province } from '../types';
 
 const router = Router();
 
 // GET /api/results?date=YYYY-MM-DD&region=mb|mt|mn&province=...
-router.get('/results', (req: Request, res: Response) => {
+router.get('/results', async (req: Request, res: Response) => {
     try {
         const { date, region, province } = req.query;
 
@@ -32,7 +33,7 @@ router.get('/results', (req: Request, res: Response) => {
             province: province as string | undefined,
         };
 
-        const results = getResults(query);
+        const results = await getResults(query);
 
         res.json({
             success: true,
@@ -117,10 +118,10 @@ router.get('/provinces', (req: Request, res: Response) => {
     }
 });
 
-// GET /api/search?number=...&date=...&region=...
+// GET /api/search?number=...&date=...&region=...&mode=contains|starts|ends&prize_code=db|g1|...
 router.get('/search', (req: Request, res: Response) => {
     try {
-        const { number, date, region } = req.query;
+        const { number, date, region, mode, prize_code } = req.query;
 
         if (!number || (number as string).trim().length === 0) {
             res.status(400).json({
@@ -148,7 +149,19 @@ router.get('/search', (req: Request, res: Response) => {
             return;
         }
 
-        const results = searchByNumber(cleanNumber, date as string, region as string);
+        // Validate search mode
+        const validModes = ['contains', 'starts', 'ends'];
+        const searchMode: SearchMode = (mode && validModes.includes(mode as string))
+            ? (mode as SearchMode)
+            : 'contains';
+
+        // Validate prize_code
+        const validPrizeCodes = ['db', 'g1', 'g2', 'g3', 'g4', 'g5', 'g6', 'g7', 'g8'];
+        const prizeCode = (prize_code && validPrizeCodes.includes(prize_code as string))
+            ? (prize_code as string)
+            : undefined;
+
+        const results = searchByNumber(cleanNumber, date as string, region as string, searchMode, prizeCode);
 
         res.json({
             success: true,
@@ -166,4 +179,47 @@ router.get('/search', (req: Request, res: Response) => {
     }
 });
 
+// POST /api/crawl — crawl results for a specific date and region
+router.post('/crawl', async (req: Request, res: Response) => {
+    try {
+        const { date, region } = req.body as { date?: string; region?: string };
+
+        if (!date || !validateDate(date)) {
+            res.status(400).json({ success: false, error: 'Ngày không hợp lệ (YYYY-MM-DD).' });
+            return;
+        }
+        const validRegion = (region && ['mb', 'mt', 'mn'].includes(region)) ? region as Region : 'mb';
+
+        const { crawl: doCrawl } = await import('../crawler/crawler');
+        const saved = await doCrawl(date, validRegion);
+
+        res.json({
+            success: true,
+            data: { saved, date, region: validRegion },
+        });
+    } catch (error) {
+        console.error('[POST /api/crawl]', error);
+        res.status(500).json({ success: false, error: 'Crawl thất bại.' });
+    }
+});
+
+// POST /api/backfill — crawl historical results (MB only for now)
+router.post('/backfill', async (req: Request, res: Response) => {
+    try {
+        const days = Math.min(Number(req.body?.days) || 30, 90);
+
+        const { crawlBackfill } = await import('../crawler/crawler');
+        const saved = await crawlBackfill(days);
+
+        res.json({
+            success: true,
+            data: { saved, days },
+        });
+    } catch (error) {
+        console.error('[POST /api/backfill]', error);
+        res.status(500).json({ success: false, error: 'Backfill thất bại.' });
+    }
+});
+
 export default router;
+

@@ -48,6 +48,11 @@ export default function Navbar() {
                         </Link>
                     </li>
                     <li>
+                        <Link to="/compare" className={isActive('/compare')} onClick={() => setIsOpen(false)}>
+                            ⚖️ So sánh
+                        </Link>
+                    </li>
+                    <li>
                         <Link to="/history" className={isActive('/history')} onClick={() => setIsOpen(false)}>
                             📅 Lịch sử
                         </Link>

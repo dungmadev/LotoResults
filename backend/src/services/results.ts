@@ -53,7 +53,7 @@ function buildDrawResults(drawRows: DrawRow[]): DrawResult[] {
     }));
 }
 
-export function getResults(query: ResultsQuery): DrawResult[] {
+export async function getResults(query: ResultsQuery): Promise<DrawResult[]> {
     const cacheKey = resultsCacheKey(query.date || '', query.region, query.province);
     const cached = getCache<DrawResult[]>(cacheKey);
     if (cached) return cached;
@@ -83,7 +83,29 @@ export function getResults(query: ResultsQuery): DrawResult[] {
     sql += ' ORDER BY d.draw_date DESC, d.region, d.province_id';
 
     const drawRows = db.prepare(sql).all(...params) as DrawRow[];
-    const results = buildDrawResults(drawRows);
+
+    // Autocrawl if requesting a specific date + region but we have no results yet
+    let results = buildDrawResults(drawRows);
+    if (results.length === 0 && query.date) {
+        // Try crawling
+        const regionsToCrawl: Region[] = query.region ? [query.region as Region] : ['mb', 'mt', 'mn'];
+        let newDrawsSaved = 0;
+
+        try {
+            const { crawl } = await import('../crawler/crawler');
+            for (const r of regionsToCrawl) {
+                newDrawsSaved += await crawl(query.date, r);
+            }
+        } catch (error) {
+            console.error('[getResults] Auto-crawl failed:', error);
+        }
+
+        // Re-query if we saved anything
+        if (newDrawsSaved > 0) {
+            const reRow = db.prepare(sql).all(...params) as DrawRow[];
+            results = buildDrawResults(reRow);
+        }
+    }
 
     // Cache: old dates get long TTL, today gets short TTL
     const today = new Date().toISOString().split('T')[0];
@@ -161,8 +183,35 @@ export function getProvinces(region?: string): Province[] {
     return provinces;
 }
 
-export function searchByNumber(number: string, date?: string, region?: string): DrawResult[] {
+export type SearchMode = 'contains' | 'starts' | 'ends';
+
+export function searchByNumber(
+    number: string,
+    date?: string,
+    region?: string,
+    mode: SearchMode = 'contains',
+    prizeCode?: string,
+): DrawResult[] {
     const db = getDb();
+
+    // Build LIKE pattern based on search mode
+    let likePattern: string;
+    switch (mode) {
+        case 'starts':
+            // Match numbers that start with the search term
+            // numbers is stored as JSON array: ["12345","67890"]
+            likePattern = `%"${number}%`;
+            break;
+        case 'ends':
+            // Match numbers that end with the search term
+            likePattern = `%${number}"%`;
+            break;
+        case 'contains':
+        default:
+            likePattern = `%${number}%`;
+            break;
+    }
+
     let sql = `
     SELECT DISTINCT d.*, p.name as province_name
     FROM draws d
@@ -170,7 +219,13 @@ export function searchByNumber(number: string, date?: string, region?: string): 
     JOIN prizes pr ON pr.draw_id = d.id
     WHERE pr.numbers LIKE ?
   `;
-    const params: any[] = [`%${number}%`];
+    const params: any[] = [likePattern];
+
+    // Filter by specific prize tier (db, g1, g2, ...)
+    if (prizeCode) {
+        sql += ' AND pr.prize_code = ?';
+        params.push(prizeCode);
+    }
 
     if (date) {
         sql += ' AND d.draw_date = ?';

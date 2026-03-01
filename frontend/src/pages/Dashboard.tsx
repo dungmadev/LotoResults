@@ -6,12 +6,15 @@ import type { Region, DrawResult } from '../types';
 import ResultTable from '../components/ResultTable';
 import { CardSkeleton } from '../components/LoadingSkeleton';
 import ErrorState from '../components/ErrorState';
+import ScheduleWidget from '../components/ScheduleWidget';
+import { useDrawSchedule } from '../hooks/useDrawSchedule';
 import { useState } from 'react';
 
 const REGIONS: Region[] = ['mb', 'mt', 'mn'];
 
 export default function Dashboard() {
     const [quickSearch, setQuickSearch] = useState('');
+    const { isLive, liveRegions } = useDrawSchedule();
 
     const { data: provinces } = useQuery({
         queryKey: ['provinces'],
@@ -24,6 +27,8 @@ export default function Dashboard() {
             queryKey: ['latest', region] as const,
             queryFn: () => fetchLatestResults({ region }),
             staleTime: 1000 * 60 * 2,
+            // Auto-refresh every 15s during live draw for active regions
+            refetchInterval: (isLive && liveRegions.includes(region)) ? 15000 : false as const,
         })),
     });
 
@@ -63,6 +68,9 @@ export default function Dashboard() {
                 </div>
             </section>
 
+            {/* Schedule & Countdown */}
+            <ScheduleWidget />
+
             {/* Quick Search */}
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '32px' }}>
                 <div className="search-box animate-fade-in stagger-1">
@@ -90,6 +98,12 @@ export default function Dashboard() {
                                 <span className={`region-badge ${region}`}>
                                     {region.toUpperCase()}
                                 </span>
+                                {isLive && liveRegions.includes(region) && (
+                                    <span className="live-indicator" style={{ marginLeft: '8px' }}>
+                                        <span className="live-dot" />
+                                        LIVE
+                                    </span>
+                                )}
                             </div>
                             <div className="region-card-body">
                                 {query.isLoading ? (
@@ -125,7 +139,7 @@ export default function Dashboard() {
                                         ))}
                                         {results.length > 2 && (
                                             <Link
-                                                to={`/search?region=${region}`}
+                                                to={`/results?region=${region}`}
                                                 style={{
                                                     display: 'block',
                                                     textAlign: 'center',
