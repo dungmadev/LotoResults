@@ -1,0 +1,56 @@
+# ============================================================
+# Docker Compose — LotoResults (Xổ Số Live)
+# ============================================================
+# Usage:
+#   Development:   docker compose up --build
+#   Production:    docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# ============================================================
+
+services:
+  # ── Backend API ──
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: lotoresults-backend
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    volumes:
+      - sqlite-data:/app/data
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - app-network
+
+  # ── Frontend (Nginx) ──
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: /api
+    container_name: lotoresults-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - app-network
+
+volumes:
+  sqlite-data:
+    driver: local
+
+networks:
+  app-network:
+    driver: bridge
