@@ -1,12 +1,13 @@
 import { useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { fetchResults, fetchProvinces } from '../services/api';
 import { REGION_NAMES } from '../types';
 import type { Region, DrawResult } from '../types';
 import ResultTable from '../components/ResultTable';
 import LoadingSkeleton from '../components/LoadingSkeleton';
 import ErrorState, { EmptyState } from '../components/ErrorState';
+import AdvancedSearchOptions, { type SearchFilters } from '../components/AdvancedSearchOptions';
 
 export default function SearchPage() {
     const [searchParams, setSearchParams] = useSearchParams();
@@ -16,6 +17,12 @@ export default function SearchPage() {
     const [province, setProvince] = useState<string>(searchParams.get('province') || '');
     const [searchNumber, setSearchNumber] = useState('');
     const [debouncedSearch, setDebouncedSearch] = useState('');
+    const [advancedOpen, setAdvancedOpen] = useState(false);
+    const [searchFilters, setSearchFilters] = useState<SearchFilters>({
+        searchType: 'contains',
+        prizeFilter: '',
+        parityFilter: 'all',
+    });
 
     // Debounce search
     useEffect(() => {
@@ -32,7 +39,7 @@ export default function SearchPage() {
 
     // Results query
     const {
-        data: results,
+        data: rawResults,
         isLoading,
         isError,
         error,
@@ -46,6 +53,48 @@ export default function SearchPage() {
         }),
         staleTime: 1000 * 60 * 2,
     });
+
+    // Filter results based on advanced search
+    const results = useMemo(() => {
+        if (!rawResults || !debouncedSearch) return rawResults;
+
+        return rawResults.map(result => {
+            const filteredPrizes = result.prizes.filter(prize => {
+                // Prize filter
+                if (searchFilters.prizeFilter && prize.prize_code !== searchFilters.prizeFilter) {
+                    return false;
+                }
+
+                // Check if any number matches the search
+                return prize.numbers.some(num => {
+                    // Parity filter
+                    if (searchFilters.parityFilter !== 'all') {
+                        const lastDigit = parseInt(num.slice(-1));
+                        if (searchFilters.parityFilter === 'even' && lastDigit % 2 !== 0) return false;
+                        if (searchFilters.parityFilter === 'odd' && lastDigit % 2 === 0) return false;
+                    }
+
+                    // Search type filter
+                    switch (searchFilters.searchType) {
+                        case 'contains':
+                            return num.includes(debouncedSearch);
+                        case 'startsWith':
+                            return num.startsWith(debouncedSearch);
+                        case 'endsWith':
+                            return num.endsWith(debouncedSearch);
+                        default:
+                            return num.includes(debouncedSearch);
+                    }
+                });
+            });
+
+            // Only return results that have matching prizes
+            return filteredPrizes.length > 0 ? {
+                ...result,
+                prizes: filteredPrizes,
+            } : null;
+        }).filter((r): r is DrawResult => r !== null);
+    }, [rawResults, debouncedSearch, searchFilters]);
 
     // Update URL params
     const updateParams = useCallback(() => {
@@ -131,6 +180,16 @@ export default function SearchPage() {
                     </button>
                 </div>
             </div>
+
+            {/* Advanced Search Options */}
+            {searchNumber && (
+                <AdvancedSearchOptions
+                    filters={searchFilters}
+                    onFiltersChange={setSearchFilters}
+                    isOpen={advancedOpen}
+                    onToggle={() => setAdvancedOpen(!advancedOpen)}
+                />
+            )}
 
             {/* Results */}
             {isLoading ? (
