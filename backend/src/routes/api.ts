@@ -180,8 +180,8 @@ router.get('/stats/frequency', (req: Request, res: Response) => {
             return;
         }
 
-        const daysNum = days ? parseInt(days as string) : 30;
-        if (isNaN(daysNum) || daysNum < 1 || daysNum > 365) {
+        const daysNum = days ? parseInt(days as string, 10) : 30;
+        if (!days || isNaN(daysNum) || daysNum < 1 || daysNum > 365) {
             res.status(400).json({
                 success: false,
                 error: 'Số ngày phải từ 1-365.',
@@ -217,10 +217,10 @@ router.get('/stats/hot-cold', (req: Request, res: Response) => {
             return;
         }
 
-        const daysNum = days ? parseInt(days as string) : 30;
-        const limitNum = limit ? parseInt(limit as string) : 10;
+        const daysNum = days ? parseInt(days as string, 10) : 30;
+        const limitNum = limit ? parseInt(limit as string, 10) : 10;
 
-        if (isNaN(daysNum) || daysNum < 1 || daysNum > 365) {
+        if (!days || isNaN(daysNum) || daysNum < 1 || daysNum > 365) {
             res.status(400).json({
                 success: false,
                 error: 'Số ngày phải từ 1-365.',
@@ -228,7 +228,7 @@ router.get('/stats/hot-cold', (req: Request, res: Response) => {
             return;
         }
 
-        if (isNaN(limitNum) || limitNum < 1 || limitNum > 50) {
+        if (!limit || isNaN(limitNum) || limitNum < 1 || limitNum > 50) {
             res.status(400).json({
                 success: false,
                 error: 'Limit phải từ 1-50.',

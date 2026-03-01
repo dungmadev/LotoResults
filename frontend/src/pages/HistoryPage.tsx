@@ -65,10 +65,14 @@ export default function HistoryPage() {
 
     // Group results by date
     const groupedByDate = (results || []).reduce((acc, result) => {
-        if (!acc[result.draw_date]) {
-            acc[result.draw_date] = [];
+        const date = result.draw_date;
+        if (!acc[date]) {
+            acc[date] = [];
         }
-        acc[result.draw_date]!.push(result);
+        const dateArray = acc[date];
+        if (dateArray) {
+            dateArray.push(result);
+        }
         return acc;
     }, {} as Record<string, typeof results>);
 

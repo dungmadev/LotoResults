@@ -58,7 +58,7 @@ export default function AdvancedSearchOptions({ filters, onFiltersChange, isOpen
                                 ].map(option => (
                                     <button
                                         key={option.value}
-                                        onClick={() => onFiltersChange({ ...filters, searchType: option.value as any })}
+                                        onClick={() => onFiltersChange({ ...filters, searchType: option.value as SearchFilters['searchType'] })}
                                         style={{
                                             padding: '8px 16px',
                                             borderRadius: '6px',
@@ -113,7 +113,7 @@ export default function AdvancedSearchOptions({ filters, onFiltersChange, isOpen
                                 ].map(option => (
                                     <button
                                         key={option.value}
-                                        onClick={() => onFiltersChange({ ...filters, parityFilter: option.value as any })}
+                                        onClick={() => onFiltersChange({ ...filters, parityFilter: option.value as SearchFilters['parityFilter'] })}
                                         style={{
                                             padding: '8px 16px',
                                             borderRadius: '6px',
