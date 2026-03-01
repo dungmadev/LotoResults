@@ -1517,3 +1517,209 @@ a:hover {
     max-width: none;
   }
 }
+
+/* ============== PROCESS INDICATOR (Progress Bar) ============== */
+
+/**
+ * ProcessIndicator sits between Navbar and page content.
+ * Uses max-height + opacity transitions for smooth fade-in/out
+ * without needing JS setState — purely CSS driven.
+ */
+.process-indicator {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition:
+    max-height var(--transition-slow),
+    opacity var(--transition-normal),
+    background var(--transition-normal);
+  background: linear-gradient(135deg,
+    rgba(139, 92, 246, 0.08),
+    rgba(59, 130, 246, 0.08));
+  border-bottom: 1px solid transparent;
+}
+
+/* Visible state — slides in from collapsed */
+.process-indicator-visible {
+  max-height: 80px;
+  opacity: 1;
+  border-bottom-color: var(--border-color);
+}
+
+/* Complete state — green tint */
+.process-indicator-complete {
+  background: linear-gradient(135deg,
+    rgba(16, 185, 129, 0.1),
+    rgba(52, 211, 153, 0.08));
+}
+
+/* Error state — red tint */
+.process-indicator-error {
+  background: linear-gradient(135deg,
+    rgba(255, 71, 87, 0.1),
+    rgba(239, 68, 68, 0.08));
+}
+
+/* Inner content layout */
+.process-indicator-content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 24px 6px;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+/* SVG icon sizing */
+.process-indicator-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  color: var(--accent-purple);
+  transition: color var(--transition-normal);
+}
+
+/* Spinning animation for processing state */
+.process-indicator-icon.spinning {
+  animation: spin 1s linear infinite;
+}
+
+/* Complete icon color */
+.process-indicator-complete .process-indicator-icon {
+  color: var(--accent-green);
+}
+
+/* Error icon color */
+.process-indicator-error .process-indicator-icon {
+  color: var(--accent-red);
+}
+
+/* Status message text */
+.process-indicator-message {
+  flex: 1;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Percentage display */
+.process-indicator-percent {
+  font-size: 0.82rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: var(--accent-purple);
+  min-width: 38px;
+  text-align: right;
+  transition: color var(--transition-normal);
+}
+
+.process-indicator-complete .process-indicator-percent {
+  color: var(--accent-green);
+}
+
+.process-indicator-error .process-indicator-percent {
+  color: var(--accent-red);
+}
+
+/* Progress bar track (background) */
+.process-indicator-track {
+  height: 3px;
+  background: rgba(139, 149, 176, 0.1);
+  overflow: hidden;
+}
+
+/* Progress bar fill — smooth width transition */
+.process-indicator-bar {
+  height: 100%;
+  background: linear-gradient(90deg,
+    var(--accent-purple),
+    var(--accent-blue));
+  border-radius: 0 2px 2px 0;
+  transition: width 0.5s ease-in-out;
+  position: relative;
+}
+
+/* Shimmer effect on active progress bar */
+.process-indicator-bar::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.3) 50%,
+    transparent 100%);
+  animation: progress-shimmer 1.5s ease-in-out infinite;
+}
+
+/* Complete state bar */
+.process-indicator-bar-complete {
+  background: linear-gradient(90deg,
+    var(--accent-green),
+    #34d399);
+}
+
+/* Complete state: no shimmer */
+.process-indicator-bar-complete::after {
+  animation: none;
+  opacity: 0;
+}
+
+/* Error state bar */
+.process-indicator-bar-error {
+  background: linear-gradient(90deg,
+    var(--accent-red),
+    #f87171);
+}
+
+/* Error state: no shimmer */
+.process-indicator-bar-error::after {
+  animation: none;
+  opacity: 0;
+}
+
+/* Shimmer animation */
+@keyframes progress-shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(200%); }
+}
+
+/* Light theme overrides */
+[data-theme="light"] .process-indicator {
+  background: linear-gradient(135deg,
+    rgba(124, 58, 237, 0.05),
+    rgba(37, 99, 235, 0.05));
+}
+
+[data-theme="light"] .process-indicator-complete {
+  background: linear-gradient(135deg,
+    rgba(5, 150, 105, 0.06),
+    rgba(52, 211, 153, 0.05));
+}
+
+[data-theme="light"] .process-indicator-error {
+  background: linear-gradient(135deg,
+    rgba(230, 57, 80, 0.06),
+    rgba(239, 68, 68, 0.05));
+}
+
+[data-theme="light"] .process-indicator-track {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+/* Responsive: smaller padding on mobile */
+@media (max-width: 768px) {
+  .process-indicator-content {
+    padding: 8px 16px 4px;
+    gap: 8px;
+  }
+
+  .process-indicator-message {
+    font-size: 0.8rem;
+  }
+}
