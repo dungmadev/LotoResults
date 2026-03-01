@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { fetchResults, fetchProvinces } from '../services/api';
 import { REGION_NAMES } from '../types';
 import type { Region, DrawResult } from '../types';
@@ -54,65 +54,33 @@ export default function SearchPage() {
         staleTime: 1000 * 60 * 2,
     });
 
-    // Filter results based on advanced search
-    const results = useMemo(() => {
-        if (!rawResults || !debouncedSearch) return rawResults;
-
-        return rawResults.map(result => {
-            const filteredPrizes = result.prizes.filter(prize => {
-                // Prize filter
-                if (searchFilters.prizeFilter && prize.prize_code !== searchFilters.prizeFilter) {
-                    return false;
-                }
-
-                // Check if any number matches the search
-                return prize.numbers.some(num => {
-                    // Parity filter
-                    if (searchFilters.parityFilter !== 'all') {
-                        const lastDigit = parseInt(num.slice(-1));
-                        if (searchFilters.parityFilter === 'even' && lastDigit % 2 !== 0) return false;
-                        if (searchFilters.parityFilter === 'odd' && lastDigit % 2 === 0) return false;
-                    }
-
-                    // Search type filter
-                    switch (searchFilters.searchType) {
-                        case 'contains':
-                            return num.includes(debouncedSearch);
-                        case 'startsWith':
-                            return num.startsWith(debouncedSearch);
-                        case 'endsWith':
-                            return num.endsWith(debouncedSearch);
-                        default:
-                            return num.includes(debouncedSearch);
-                    }
-                });
-            });
-
-            // Only return results that have matching prizes
-            return filteredPrizes.length > 0 ? {
-                ...result,
-                prizes: filteredPrizes,
-            } : null;
-        }).filter((r): r is DrawResult => r !== null);
-    }, [rawResults, debouncedSearch, searchFilters]);
-
-    // Update URL params
-    const updateParams = useCallback(() => {
+    // Sync URL params from event handlers
+    const syncParams = (overrides: { date?: string; region?: string; province?: string } = {}) => {
         const params = new URLSearchParams();
-        if (date) params.set('date', date);
-        if (region) params.set('region', region);
-        if (province) params.set('province', province);
+        const d = overrides.date ?? date;
+        const r = overrides.region ?? region;
+        const p = overrides.province ?? province;
+        if (d) params.set('date', d);
+        if (r) params.set('region', r);
+        if (p) params.set('province', p);
         setSearchParams(params, { replace: true });
-    }, [date, region, province, setSearchParams]);
+    };
 
-    useEffect(() => {
-        updateParams();
-    }, [updateParams]);
+    const handleDateChange = (newDate: string) => {
+        setDate(newDate);
+        syncParams({ date: newDate });
+    };
 
-    // Reset province when region changes
-    useEffect(() => {
+    const handleRegionChange = (newRegion: string) => {
+        setRegion(newRegion);
         setProvince('');
-    }, [region]);
+        syncParams({ region: newRegion, province: '' });
+    };
+
+    const handleProvinceChange = (newProvince: string) => {
+        setProvince(newProvince);
+        syncParams({ province: newProvince });
+    };
 
     return (
         <div className="page-container">
@@ -129,7 +97,7 @@ export default function SearchPage() {
                         type="date"
                         className="filter-input"
                         value={date}
-                        onChange={(e) => setDate(e.target.value)}
+                        onChange={(e) => handleDateChange(e.target.value)}
                     />
                 </div>
 
@@ -138,7 +106,7 @@ export default function SearchPage() {
                     <select
                         className="filter-select"
                         value={region}
-                        onChange={(e) => setRegion(e.target.value)}
+                        onChange={(e) => handleRegionChange(e.target.value)}
                     >
                         <option value="">Tất cả miền</option>
                         {(Object.entries(REGION_NAMES) as [Region, string][]).map(([key, name]) => (
@@ -152,7 +120,7 @@ export default function SearchPage() {
                     <select
                         className="filter-select"
                         value={province}
-                        onChange={(e) => setProvince(e.target.value)}
+                        onChange={(e) => handleProvinceChange(e.target.value)}
                     >
                         <option value="">Tất cả đài</option>
                         {provinces?.map(p => (
@@ -200,7 +168,7 @@ export default function SearchPage() {
                 </div>
             ) : isError ? (
                 <ErrorState
-                    message={(error as Error)?.message}
+                    message={error instanceof Error ? error.message : 'Đã xảy ra lỗi'}
                     onRetry={() => refetch()}
                 />
             ) : !results || results.length === 0 ? (
