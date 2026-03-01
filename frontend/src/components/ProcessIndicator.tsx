@@ -7,8 +7,9 @@ import { useQueueProgress } from '../hooks/useQueueProgressContext';
  * - Appears with fade-in when processing starts
  * - Shows animated progress bar with percentage
  * - SVG spinner icon indicates active processing
+ * - Displays source info (which crawler source is active/won)
  * - Fade-out when hidden (via CSS transition on opacity + max-height)
- * - Does NOT overlay content — uses relative positioning in document flow
+ * - Does NOT overlay content — uses sticky positioning in document flow
  */
 export default function ProcessIndicator() {
     const { visible, progress, status, message } = useQueueProgress();

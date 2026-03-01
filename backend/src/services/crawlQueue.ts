@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events';
-import { Region } from '../types';
+import { Region, REGION_NAMES } from '../types';
 import { clearByPrefix } from './cache';
+import { getProvincesForDate } from '../utils/provinces';
 
 // --- Types ---
 
@@ -25,8 +26,8 @@ export interface CrawlQueueEvent {
     savedCount?: number;
     message: string;
     progress?: {
-        current: number;  // Jobs completed in this batch
-        total: number;    // Total jobs in this batch
+        current: number;  // Provinces completed in this batch
+        total: number;    // Total provinces in this batch
         batchId: string;  // Unique batch identifier
     };
 }
@@ -47,8 +48,8 @@ class CrawlQueue extends EventEmitter {
 
     // Batch tracking: groups related jobs for progress calculation
     private currentBatchId: string | null = null;
-    private batchTotal = 0;
-    private batchCompleted = 0;
+    private batchTotal = 0;         // Total provinces across all regions in batch
+    private batchCompleted = 0;     // Provinces completed so far
 
     private constructor() {
         super();
@@ -79,6 +80,19 @@ class CrawlQueue extends EventEmitter {
     }
 
     /**
+     * Calculate total provinces for a set of regions on a given date.
+     * Used to set batchTotal for accurate progress tracking.
+     */
+    private calculateProvinceCount(date: string, regions: Region[]): number {
+        let total = 0;
+        for (const region of regions) {
+            const provinces = getProvincesForDate(date, region);
+            total += provinces.length;
+        }
+        return total;
+    }
+
+    /**
      * Enqueue a crawl job. Returns false if duplicate or queue full.
      */
     enqueue(date: string, region: Region): { enqueued: boolean; jobId: string; reason?: string } {
@@ -101,7 +115,10 @@ class CrawlQueue extends EventEmitter {
             this.batchTotal = 0;
             this.batchCompleted = 0;
         }
-        this.batchTotal++;
+
+        // Add province count for this region on this date
+        const provinceCount = this.calculateProvinceCount(date, [region]);
+        this.batchTotal += provinceCount;
 
         const job: CrawlJob = {
             id,
@@ -114,13 +131,14 @@ class CrawlQueue extends EventEmitter {
         };
 
         this.queue.push(job);
-        console.log(`[CrawlQueue] ✅ Enqueued: ${id} (batch: ${this.currentBatchId}, ${this.batchCompleted}/${this.batchTotal})`);
+        console.log(`[CrawlQueue] ✅ Enqueued: ${id} (${provinceCount} tỉnh, batch: ${this.batchCompleted}/${this.batchTotal})`);
 
-        // Emit progress event
+        // Emit a single progress event for the batch start 
+        // (only when batch is new — first enqueue)
         this.emitEvent({
             type: 'crawl-progress',
             job,
-            message: `Đã thêm vào hàng đợi: ${region.toUpperCase()} ngày ${date}`,
+            message: `Đang chuẩn bị tải ${REGION_NAMES[region]}...`,
         });
 
         // Start processing if not already running
@@ -152,37 +170,45 @@ class CrawlQueue extends EventEmitter {
         nextJob.status = 'processing';
         nextJob.startedAt = new Date().toISOString();
 
+        const regionName = REGION_NAMES[nextJob.region];
         console.log(`[CrawlQueue] 🔄 Processing: ${nextJob.id} (attempt ${nextJob.retries + 1}/${nextJob.maxRetries + 1})`);
 
+        // Emit progress: processing started (no message spam — just one event)
         this.emitEvent({
             type: 'crawl-progress',
             job: nextJob,
-            message: `Đang crawl: ${nextJob.region.toUpperCase()} ngày ${nextJob.date}`,
+            message: `Đang tải ${regionName} ngày ${nextJob.date}...`,
         });
 
         try {
             // Dynamic import to avoid circular dependency issues
             const { crawl } = await import('../crawler/crawler');
-            const savedCount = await crawl(nextJob.date, nextJob.region);
+
+            // Call crawl WITHOUT source progress callback — cleaner events
+            const result = await crawl(nextJob.date, nextJob.region);
 
             nextJob.status = 'done';
             nextJob.completedAt = new Date().toISOString();
 
-            // Increment batch progress BEFORE emitting event
-            this.batchCompleted++;
+            // Increment batch progress by number of provinces crawled
+            const provincesCrawled = result.provinceCount || 1;
+            this.batchCompleted += provincesCrawled;
+
+            // Build province names display
+            const provinceNames = result.provinceNames?.join(', ') || regionName;
 
             // Invalidate all cached results for this date so next fetch gets fresh DB data
             clearByPrefix(`results:${nextJob.date}`);
             // Also clear "latest" cache since new data may affect latest results
             clearByPrefix('latest:');
 
-            console.log(`[CrawlQueue] ✅ Done: ${nextJob.id}, saved ${savedCount} results (batch: ${this.batchCompleted}/${this.batchTotal}, cache cleared)`);
+            console.log(`[CrawlQueue] ✅ Done: ${nextJob.id}, saved ${result.savedCount} results, ${provincesCrawled} tỉnh (batch: ${this.batchCompleted}/${this.batchTotal}, cache cleared)`);
 
             this.emitEvent({
                 type: 'data-ready',
                 job: nextJob,
-                savedCount,
-                message: `Đã cập nhật: ${nextJob.region.toUpperCase()} ngày ${nextJob.date} (${savedCount} kết quả)`,
+                savedCount: result.savedCount,
+                message: `Đã cập nhật: ${provinceNames} (${result.savedCount} kết quả)`,
             });
 
         } catch (error) {
@@ -197,12 +223,7 @@ class CrawlQueue extends EventEmitter {
                 const delay = BASE_DELAY_MS * Math.pow(2, nextJob.retries - 1);
                 console.log(`[CrawlQueue] 🔁 Retry ${nextJob.retries}/${nextJob.maxRetries} in ${delay}ms`);
 
-                this.emitEvent({
-                    type: 'crawl-progress',
-                    job: nextJob,
-                    message: `Đang thử lại (${nextJob.retries}/${nextJob.maxRetries}): ${nextJob.region.toUpperCase()} ngày ${nextJob.date}`,
-                });
-
+                // No event on retry — silent retry
                 await this.delay(delay);
             } else {
                 // Max retries reached
@@ -210,15 +231,16 @@ class CrawlQueue extends EventEmitter {
                 nextJob.error = errMsg;
                 nextJob.completedAt = new Date().toISOString();
 
-                // Count failed jobs as "completed" for progress tracking
-                this.batchCompleted++;
+                // Count failed job's provinces as "completed" for progress tracking
+                const failedProvinceCount = this.calculateProvinceCount(nextJob.date, [nextJob.region]);
+                this.batchCompleted += failedProvinceCount;
 
                 console.error(`[CrawlQueue] ☠️ Permanently failed: ${nextJob.id} after ${nextJob.maxRetries} retries (batch: ${this.batchCompleted}/${this.batchTotal})`);
 
                 this.emitEvent({
                     type: 'crawl-error',
                     job: nextJob,
-                    message: `Crawl thất bại: ${nextJob.region.toUpperCase()} ngày ${nextJob.date} — ${errMsg}`,
+                    message: `Tải thất bại: ${regionName} ngày ${nextJob.date}`,
                 });
             }
         }

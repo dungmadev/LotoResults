@@ -26,3 +26,8 @@ Vì bạn là một Project Manager kiêm Developer, bạn nên lưu ý 3 điể
 * **Socket Room:** Nếu ứng dụng của bạn có nhiều người dùng, hãy yêu cầu AI sử dụng `socket.to(userId).emit` để tránh việc tiến trình của người này hiện lên màn hình của người khác.
 
 ---
+
+
+Hiện tại khi fetch vẫn thấy nhiều thông báo hiện lên
+tôi muốn bạn thu thập số lượng các tỉnh rồi thu thập, xử lý được thì cập nhật progress bar
+không hiện các thông báo như cũ

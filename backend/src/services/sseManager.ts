@@ -33,6 +33,7 @@ class SSEManager {
                     status: event.job.status,
                 },
                 savedCount: event.savedCount,
+                progress: event.progress,
                 timestamp: new Date().toISOString(),
             });
         });
