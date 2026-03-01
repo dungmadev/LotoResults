@@ -66,6 +66,9 @@ export default function SearchPage() {
         staleTime: 1000 * 60 * 2,
     });
 
+    // Derive results from rawResults
+    const results = rawResults || [];
+
     // Sync URL with explicit named query params
     const syncParams = (overrides: { date?: string; region?: string; province?: string } = {}) => {
         const params = new URLSearchParams();
