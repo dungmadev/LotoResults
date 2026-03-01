@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { useTheme } from '../hooks/useTheme';
+import { useTheme } from '../hooks/useThemeContext';
 
 export default function Navbar() {
     const [isOpen, setIsOpen] = useState(false);

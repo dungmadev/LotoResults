@@ -61,9 +61,10 @@ export default function SearchPage() {
     }, [updateParams]);
 
     // Reset province when region changes
-    useEffect(() => {
+    const handleRegionChange = (newRegion: string) => {
+        setRegion(newRegion);
         setProvince('');
-    }, [region]);
+    };
 
     return (
         <div className="page-container">
@@ -89,7 +90,7 @@ export default function SearchPage() {
                     <select
                         className="filter-select"
                         value={region}
-                        onChange={(e) => setRegion(e.target.value)}
+                        onChange={(e) => handleRegionChange(e.target.value)}
                     >
                         <option value="">Tất cả miền</option>
                         {(Object.entries(REGION_NAMES) as [Region, string][]).map(([key, name]) => (
@@ -141,7 +142,7 @@ export default function SearchPage() {
                 </div>
             ) : isError ? (
                 <ErrorState
-                    message={(error as Error)?.message}
+                    message={error instanceof Error ? error.message : 'Đã xảy ra lỗi'}
                     onRetry={() => refetch()}
                 />
             ) : !results || results.length === 0 ? (

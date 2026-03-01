@@ -3,21 +3,11 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { fetchResults } from '../services/api';
 import { REGION_NAMES } from '../types';
-import type { Region } from '../types';
+import type { Region, DrawResult } from '../types';
 import LoadingSkeleton from '../components/LoadingSkeleton';
 import ErrorState, { EmptyState } from '../components/ErrorState';
 
 type TimeRange = 7 | 30 | 90;
-
-function getDateRange(days: number): { start: string; end: string } {
-    const end = new Date();
-    const start = new Date();
-    start.setDate(start.getDate() - days);
-    return {
-        start: start.toISOString().split('T')[0],
-        end: end.toISOString().split('T')[0],
-    };
-}
 
 function getDatesInRange(days: number): string[] {
     const dates: string[] = [];
@@ -58,13 +48,14 @@ export default function HistoryPage() {
     });
 
     // Group results by date
-    const groupedByDate = (results || []).reduce((acc, result) => {
-        if (!acc[result.draw_date]) {
-            acc[result.draw_date] = [];
+    const groupedByDate = (results || []).reduce<Record<string, DrawResult[]>>((acc, result) => {
+        const dateKey = result.draw_date;
+        if (!acc[dateKey]) {
+            acc[dateKey] = [];
         }
-        acc[result.draw_date].push(result);
+        acc[dateKey].push(result);
         return acc;
-    }, {} as Record<string, typeof results>);
+    }, {});
 
     const sortedDates = Object.keys(groupedByDate).sort((a, b) => b.localeCompare(a));
 
@@ -111,7 +102,7 @@ export default function HistoryPage() {
                 </div>
             ) : isError ? (
                 <ErrorState
-                    message={(error as Error)?.message}
+                    message={error instanceof Error ? error.message : 'Đã xảy ra lỗi'}
                     onRetry={() => refetch()}
                 />
             ) : sortedDates.length === 0 ? (
@@ -129,7 +120,7 @@ export default function HistoryPage() {
                         });
 
                         // Group by region
-                        const regionGroups = dateResults.reduce((acc: Record<string, number>, r: any) => {
+                        const regionGroups = dateResults.reduce<Record<string, number>>((acc, r: DrawResult) => {
                             acc[r.region] = (acc[r.region] || 0) + 1;
                             return acc;
                         }, {});
