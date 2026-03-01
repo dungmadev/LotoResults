@@ -1456,6 +1456,7 @@ a:hover {
     opacity: 0;
     transform: translateX(100px) scale(0.9);
   }
+
   to {
     opacity: 1;
     transform: translateX(0) scale(1);
@@ -1467,6 +1468,7 @@ a:hover {
     opacity: 1;
     transform: translateX(0) scale(1);
   }
+
   to {
     opacity: 0;
     transform: translateX(100px) scale(0.9);
@@ -1502,12 +1504,21 @@ a:hover {
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @keyframes pulse-glow {
-  0%, 100% { border-color: rgba(59, 130, 246, 0.2); }
-  50% { border-color: rgba(59, 130, 246, 0.4); }
+
+  0%,
+  100% {
+    border-color: rgba(59, 130, 246, 0.2);
+  }
+
+  50% {
+    border-color: rgba(59, 130, 246, 0.4);
+  }
 }
 
 @media (max-width: 480px) {
@@ -1526,6 +1537,9 @@ a:hover {
  * without needing JS setState — purely CSS driven.
  */
 .process-indicator {
+  position: sticky;
+  top: 0;
+  z-index: 100;
   max-height: 0;
   opacity: 0;
   overflow: hidden;
@@ -1534,8 +1548,8 @@ a:hover {
     opacity var(--transition-normal),
     background var(--transition-normal);
   background: linear-gradient(135deg,
-    rgba(139, 92, 246, 0.08),
-    rgba(59, 130, 246, 0.08));
+      rgba(139, 92, 246, 0.08),
+      rgba(59, 130, 246, 0.08));
   border-bottom: 1px solid transparent;
 }
 
@@ -1549,15 +1563,15 @@ a:hover {
 /* Complete state — green tint */
 .process-indicator-complete {
   background: linear-gradient(135deg,
-    rgba(16, 185, 129, 0.1),
-    rgba(52, 211, 153, 0.08));
+      rgba(16, 185, 129, 0.1),
+      rgba(52, 211, 153, 0.08));
 }
 
 /* Error state — red tint */
 .process-indicator-error {
   background: linear-gradient(135deg,
-    rgba(255, 71, 87, 0.1),
-    rgba(239, 68, 68, 0.08));
+      rgba(255, 71, 87, 0.1),
+      rgba(239, 68, 68, 0.08));
 }
 
 /* Inner content layout */
@@ -1624,6 +1638,21 @@ a:hover {
   color: var(--accent-red);
 }
 
+/* Source info badge — shows which crawler source won */
+.process-indicator-source {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: 12px;
+  background: rgba(16, 185, 129, 0.12);
+  color: var(--accent-green);
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+  animation: fadeIn 0.3s ease forwards;
+}
+
 /* Progress bar track (background) */
 .process-indicator-track {
   height: 3px;
@@ -1635,8 +1664,8 @@ a:hover {
 .process-indicator-bar {
   height: 100%;
   background: linear-gradient(90deg,
-    var(--accent-purple),
-    var(--accent-blue));
+      var(--accent-purple),
+      var(--accent-blue));
   border-radius: 0 2px 2px 0;
   transition: width 0.5s ease-in-out;
   position: relative;
@@ -1651,17 +1680,17 @@ a:hover {
   right: 0;
   bottom: 0;
   background: linear-gradient(90deg,
-    transparent 0%,
-    rgba(255, 255, 255, 0.3) 50%,
-    transparent 100%);
+      transparent 0%,
+      rgba(255, 255, 255, 0.3) 50%,
+      transparent 100%);
   animation: progress-shimmer 1.5s ease-in-out infinite;
 }
 
 /* Complete state bar */
 .process-indicator-bar-complete {
   background: linear-gradient(90deg,
-    var(--accent-green),
-    #34d399);
+      var(--accent-green),
+      #34d399);
 }
 
 /* Complete state: no shimmer */
@@ -1673,8 +1702,8 @@ a:hover {
 /* Error state bar */
 .process-indicator-bar-error {
   background: linear-gradient(90deg,
-    var(--accent-red),
-    #f87171);
+      var(--accent-red),
+      #f87171);
 }
 
 /* Error state: no shimmer */
@@ -1685,27 +1714,32 @@ a:hover {
 
 /* Shimmer animation */
 @keyframes progress-shimmer {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(200%); }
+  0% {
+    transform: translateX(-100%);
+  }
+
+  100% {
+    transform: translateX(200%);
+  }
 }
 
 /* Light theme overrides */
 [data-theme="light"] .process-indicator {
   background: linear-gradient(135deg,
-    rgba(124, 58, 237, 0.05),
-    rgba(37, 99, 235, 0.05));
+      rgba(124, 58, 237, 0.05),
+      rgba(37, 99, 235, 0.05));
 }
 
 [data-theme="light"] .process-indicator-complete {
   background: linear-gradient(135deg,
-    rgba(5, 150, 105, 0.06),
-    rgba(52, 211, 153, 0.05));
+      rgba(5, 150, 105, 0.06),
+      rgba(52, 211, 153, 0.05));
 }
 
 [data-theme="light"] .process-indicator-error {
   background: linear-gradient(135deg,
-    rgba(230, 57, 80, 0.06),
-    rgba(239, 68, 68, 0.05));
+      rgba(230, 57, 80, 0.06),
+      rgba(239, 68, 68, 0.05));
 }
 
 [data-theme="light"] .process-indicator-track {

@@ -7,11 +7,12 @@ import { useQueueProgress } from '../hooks/useQueueProgressContext';
  * - Appears with fade-in when processing starts
  * - Shows animated progress bar with percentage
  * - SVG spinner icon indicates active processing
+ * - Displays source info (which crawler source is active/won)
  * - Fade-out when hidden (via CSS transition on opacity + max-height)
- * - Does NOT overlay content — uses relative positioning in document flow
+ * - Does NOT overlay content — uses sticky positioning in document flow
  */
 export default function ProcessIndicator() {
-    const { visible, progress, status, message } = useQueueProgress();
+    const { visible, progress, status, message, sourceInfo } = useQueueProgress();
 
     // Build CSS class names based on state
     const containerClass = [
@@ -93,6 +94,13 @@ export default function ProcessIndicator() {
 
                 {/* Status message */}
                 <span className="process-indicator-message">{message}</span>
+
+                {/* Source info badge */}
+                {sourceInfo?.winnerSource && (
+                    <span className="process-indicator-source">
+                        🏆 {sourceInfo.winnerSource}
+                    </span>
+                )}
 
                 {/* Percentage display */}
                 <span className="process-indicator-percent">{progress}%</span>

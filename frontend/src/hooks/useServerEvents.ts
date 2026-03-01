@@ -18,6 +18,10 @@ export interface SSEEvent {
         total: number;
         batchId: string;
     };
+    sourceInfo?: {
+        activeSources: string[];
+        winnerSource?: string;
+    };
 }
 
 type SSEEventHandler = (event: SSEEvent) => void;

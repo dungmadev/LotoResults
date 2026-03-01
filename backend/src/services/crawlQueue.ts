@@ -29,6 +29,10 @@ export interface CrawlQueueEvent {
         total: number;    // Total jobs in this batch
         batchId: string;  // Unique batch identifier
     };
+    sourceInfo?: {
+        activeSources: string[];     // Sources being fetched
+        winnerSource?: string;       // Source that won the race
+    };
 }
 
 // --- Constants ---
@@ -163,7 +167,19 @@ class CrawlQueue extends EventEmitter {
         try {
             // Dynamic import to avoid circular dependency issues
             const { crawl } = await import('../crawler/crawler');
-            const savedCount = await crawl(nextJob.date, nextJob.region);
+
+            // Pass source progress callback so SSE can report which sources are being fetched
+            const savedCount = await crawl(nextJob.date, nextJob.region, (sourceName, status) => {
+                this.emitEvent({
+                    type: 'crawl-progress',
+                    job: nextJob,
+                    message: `${status === 'fetching' ? '🔄 Đang lấy dữ liệu từ' : status === 'parsing' ? '📋 Đang phân tích dữ liệu từ' : status === 'done' ? '✅ Đã lấy xong từ' : '❌ Thất bại từ'} ${sourceName}`,
+                    sourceInfo: {
+                        activeSources: [sourceName],
+                        winnerSource: status === 'done' ? sourceName : undefined,
+                    },
+                });
+            });
 
             nextJob.status = 'done';
             nextJob.completedAt = new Date().toISOString();

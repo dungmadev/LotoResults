@@ -66,6 +66,7 @@ export default function useQueueProgress(): QueueProgressState & {
                             status: 'processing',
                             message: event.message,
                             batchId,
+                            sourceInfo: event.sourceInfo,
                         };
                     }
                     // Same batch → update progress
@@ -75,6 +76,7 @@ export default function useQueueProgress(): QueueProgressState & {
                         progress: percent,
                         status: 'processing',
                         message: event.message,
+                        sourceInfo: event.sourceInfo,
                     };
                 });
                 break;
