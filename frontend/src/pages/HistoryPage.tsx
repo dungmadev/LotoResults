@@ -64,7 +64,7 @@ export default function HistoryPage() {
                         date,
                         region: regionFilter || undefined,
                     });
-                    allResults.push(...res);
+                    allResults.push(...res.results);
                 } catch {
                     // Skip failed dates
                 }

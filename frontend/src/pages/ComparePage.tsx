@@ -23,7 +23,7 @@ export default function ComparePage() {
 
     // Results query — fetch all results for the date + region
     const {
-        data: results,
+        data: rawData,
         isLoading,
         isError,
         error,
@@ -37,7 +37,7 @@ export default function ComparePage() {
     });
 
     // Filter results to only selected provinces
-    const filteredResults = results?.filter(
+    const filteredResults = rawData?.results?.filter(
         (r: DrawResult) => selectedProvinces.length === 0 || selectedProvinces.includes(r.province_id)
     ) || [];
 

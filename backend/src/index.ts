@@ -4,6 +4,8 @@ import { initializeDb } from './db/database';
 import { seedDatabase } from './db/seed';
 import apiRoutes from './routes/api';
 import { apiLimiter, sanitizeInput, errorHandler } from './middleware';
+import { crawlQueue } from './services/crawlQueue';
+import { sseManager } from './services/sseManager';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -71,7 +73,16 @@ async function start(): Promise<void> {
         app.listen(PORT, () => {
             console.log(`\n🚀 XỔ SỐ API Server running at http://localhost:${PORT}`);
             console.log(`   Health check: http://localhost:${PORT}/health`);
-            console.log(`   API base:     http://localhost:${PORT}/api\n`);
+            console.log(`   API base:     http://localhost:${PORT}/api`);
+            console.log(`   SSE events:   http://localhost:${PORT}/api/events\n`);
+
+            // Auto-crawl today's data for all 3 regions after server starts
+            const today = new Date().toISOString().split('T')[0];
+            console.log(`📡 Auto-crawl: Enqueueing today's data (${today}) for all regions...`);
+            crawlQueue.enqueueAllRegions(today);
+
+            // Ensure SSE manager is initialized (singleton)
+            console.log(`📡 SSE Manager: Ready (${sseManager.getClientCount()} clients)`);
         });
     } catch (error) {
         console.error('❌ Failed to start server:', error);
@@ -82,3 +93,4 @@ async function start(): Promise<void> {
 start();
 
 export default app;
+

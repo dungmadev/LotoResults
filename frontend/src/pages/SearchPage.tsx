@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import { fetchResults, fetchProvinces, searchByNumber } from '../services/api';
+import type { FetchResultsResponse } from '../services/api';
 import { REGION_NAMES, PRIZE_NAMES } from '../types';
 import type { Region, DrawResult } from '../types';
 import ResultTable from '../components/ResultTable';
@@ -41,12 +42,12 @@ export default function SearchPage() {
 
     // Results query — use search API when number is entered, otherwise use results API
     const {
-        data: rawResults,
+        data: rawData,
         isLoading,
         isError,
         error,
         refetch,
-    } = useQuery({
+    } = useQuery<FetchResultsResponse | DrawResult[]>({
         queryKey: debouncedSearch
             ? ['search', debouncedSearch, date, region, searchMode, prizeFilter]
             : ['results', date, region, province],
@@ -66,8 +67,14 @@ export default function SearchPage() {
         staleTime: 1000 * 60 * 2,
     });
 
-    // Derive results from rawResults
-    const results = rawResults || [];
+    // Normalize: fetchResults returns { results, meta }, searchByNumber returns DrawResult[]
+    const isFetchResponse = rawData && 'results' in rawData && 'meta' in rawData;
+    const results: DrawResult[] = isFetchResponse
+        ? (rawData as FetchResultsResponse).results
+        : (rawData as DrawResult[] | undefined) || [];
+    const crawlStatus = isFetchResponse
+        ? (rawData as FetchResultsResponse).meta
+        : { status: 'ready' as const };
 
     // Sync URL with explicit named query params
     const syncParams = (overrides: { date?: string; region?: string; province?: string } = {}) => {
@@ -199,6 +206,16 @@ export default function SearchPage() {
                     isOpen={advancedOpen}
                     onToggle={() => setAdvancedOpen(!advancedOpen)}
                 />
+            )}
+
+            {/* Crawl Status Banner */}
+            {crawlStatus.status === 'crawling' && (
+                <div className="crawl-status-banner animate-fade-in">
+                    <div className="crawl-spinner" />
+                    <span className="crawl-message">
+                        {crawlStatus.message || 'Đang tải dữ liệu từ nguồn...'}
+                    </span>
+                </div>
             )}
 
             {/* Results */}
