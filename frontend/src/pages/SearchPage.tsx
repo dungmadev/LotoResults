@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { fetchResults, fetchProvinces } from '../services/api';
 import { REGION_NAMES } from '../types';
 import type { Region, DrawResult } from '../types';
@@ -47,23 +47,32 @@ export default function SearchPage() {
         staleTime: 1000 * 60 * 2,
     });
 
-    // Update URL params
-    const updateParams = useCallback(() => {
+    // Sync URL params from event handlers
+    const syncParams = (overrides: { date?: string; region?: string; province?: string } = {}) => {
         const params = new URLSearchParams();
-        if (date) params.set('date', date);
-        if (region) params.set('region', region);
-        if (province) params.set('province', province);
+        const d = overrides.date ?? date;
+        const r = overrides.region ?? region;
+        const p = overrides.province ?? province;
+        if (d) params.set('date', d);
+        if (r) params.set('region', r);
+        if (p) params.set('province', p);
         setSearchParams(params, { replace: true });
-    }, [date, region, province, setSearchParams]);
+    };
 
-    useEffect(() => {
-        updateParams();
-    }, [updateParams]);
+    const handleDateChange = (newDate: string) => {
+        setDate(newDate);
+        syncParams({ date: newDate });
+    };
 
-    // Reset province when region changes
     const handleRegionChange = (newRegion: string) => {
         setRegion(newRegion);
         setProvince('');
+        syncParams({ region: newRegion, province: '' });
+    };
+
+    const handleProvinceChange = (newProvince: string) => {
+        setProvince(newProvince);
+        syncParams({ province: newProvince });
     };
 
     return (
@@ -81,7 +90,7 @@ export default function SearchPage() {
                         type="date"
                         className="filter-input"
                         value={date}
-                        onChange={(e) => setDate(e.target.value)}
+                        onChange={(e) => handleDateChange(e.target.value)}
                     />
                 </div>
 
@@ -104,7 +113,7 @@ export default function SearchPage() {
                     <select
                         className="filter-select"
                         value={province}
-                        onChange={(e) => setProvince(e.target.value)}
+                        onChange={(e) => handleProvinceChange(e.target.value)}
                     >
                         <option value="">Tất cả đài</option>
                         {provinces?.map(p => (
