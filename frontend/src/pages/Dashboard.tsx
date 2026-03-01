@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueries } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { fetchLatestResults, fetchProvinces } from '../services/api';
 import { REGION_NAMES } from '../types';
@@ -19,12 +19,12 @@ export default function Dashboard() {
         staleTime: 1000 * 60 * 60,
     });
 
-    const latestQueries = REGIONS.map(region => {
-        return useQuery({
-            queryKey: ['latest', region],
+    const latestQueries = useQueries({
+        queries: REGIONS.map(region => ({
+            queryKey: ['latest', region] as const,
             queryFn: () => fetchLatestResults({ region }),
             staleTime: 1000 * 60 * 2,
-        });
+        })),
     });
 
     const today = new Date().toLocaleDateString('vi-VN', {
