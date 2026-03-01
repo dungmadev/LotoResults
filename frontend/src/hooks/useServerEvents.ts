@@ -13,6 +13,11 @@ export interface SSEEvent {
     };
     savedCount?: number;
     timestamp?: string;
+    progress?: {
+        current: number;
+        total: number;
+        batchId: string;
+    };
 }
 
 type SSEEventHandler = (event: SSEEvent) => void;

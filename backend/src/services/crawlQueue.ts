@@ -24,6 +24,11 @@ export interface CrawlQueueEvent {
     job: CrawlJob;
     savedCount?: number;
     message: string;
+    progress?: {
+        current: number;  // Jobs completed in this batch
+        total: number;    // Total jobs in this batch
+        batchId: string;  // Unique batch identifier
+    };
 }
 
 // --- Constants ---
@@ -39,6 +44,11 @@ class CrawlQueue extends EventEmitter {
     private queue: CrawlJob[] = [];
     private processing = false;
     private static instance: CrawlQueue;
+
+    // Batch tracking: groups related jobs for progress calculation
+    private currentBatchId: string | null = null;
+    private batchTotal = 0;
+    private batchCompleted = 0;
 
     private constructor() {
         super();
@@ -85,6 +95,14 @@ class CrawlQueue extends EventEmitter {
             return { enqueued: false, jobId: id, reason: 'Hàng đợi đầy, vui lòng thử lại sau' };
         }
 
+        // Start a new batch if no active jobs (queue was idle)
+        if (activeJobs.length === 0) {
+            this.currentBatchId = `batch-${Date.now()}`;
+            this.batchTotal = 0;
+            this.batchCompleted = 0;
+        }
+        this.batchTotal++;
+
         const job: CrawlJob = {
             id,
             date,
@@ -96,7 +114,7 @@ class CrawlQueue extends EventEmitter {
         };
 
         this.queue.push(job);
-        console.log(`[CrawlQueue] ✅ Enqueued: ${id}`);
+        console.log(`[CrawlQueue] ✅ Enqueued: ${id} (batch: ${this.currentBatchId}, ${this.batchCompleted}/${this.batchTotal})`);
 
         // Emit progress event
         this.emitEvent({
@@ -150,12 +168,15 @@ class CrawlQueue extends EventEmitter {
             nextJob.status = 'done';
             nextJob.completedAt = new Date().toISOString();
 
+            // Increment batch progress BEFORE emitting event
+            this.batchCompleted++;
+
             // Invalidate all cached results for this date so next fetch gets fresh DB data
             clearByPrefix(`results:${nextJob.date}`);
             // Also clear "latest" cache since new data may affect latest results
             clearByPrefix('latest:');
 
-            console.log(`[CrawlQueue] ✅ Done: ${nextJob.id}, saved ${savedCount} results (cache cleared)`);
+            console.log(`[CrawlQueue] ✅ Done: ${nextJob.id}, saved ${savedCount} results (batch: ${this.batchCompleted}/${this.batchTotal}, cache cleared)`);
 
             this.emitEvent({
                 type: 'data-ready',
@@ -189,7 +210,10 @@ class CrawlQueue extends EventEmitter {
                 nextJob.error = errMsg;
                 nextJob.completedAt = new Date().toISOString();
 
-                console.error(`[CrawlQueue] ☠️ Permanently failed: ${nextJob.id} after ${nextJob.maxRetries} retries`);
+                // Count failed jobs as "completed" for progress tracking
+                this.batchCompleted++;
+
+                console.error(`[CrawlQueue] ☠️ Permanently failed: ${nextJob.id} after ${nextJob.maxRetries} retries (batch: ${this.batchCompleted}/${this.batchTotal})`);
 
                 this.emitEvent({
                     type: 'crawl-error',
@@ -215,6 +239,12 @@ class CrawlQueue extends EventEmitter {
      * Emit event to all listeners (SSE manager will listen to these)
      */
     private emitEvent(event: CrawlQueueEvent): void {
+        // Attach current batch progress to every event
+        event.progress = {
+            current: this.batchCompleted,
+            total: this.batchTotal,
+            batchId: this.currentBatchId || '',
+        };
         this.emit('crawl-event', event);
     }
 

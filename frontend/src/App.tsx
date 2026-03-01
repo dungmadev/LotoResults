@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import ThemeProvider from './hooks/useTheme';
 import Navbar from './components/Navbar';
 import SSEProvider from './components/SSEProvider';
+import ProcessIndicator from './components/ProcessIndicator';
 import Dashboard from './pages/Dashboard';
 import SearchPage from './pages/SearchPage';
 import HistoryPage from './pages/HistoryPage';
@@ -25,6 +26,7 @@ function App() {
         <BrowserRouter>
           <SSEProvider>
             <Navbar />
+            <ProcessIndicator />
             <Routes>
               <Route path="/" element={<Dashboard />} />
               <Route path="/search" element={<SearchPage />} />
