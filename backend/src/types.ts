@@ -7,6 +7,7 @@ export interface Province {
     name: string;
     region: Region;
     draw_days: string[];
+    draw_time?: string;
     active: boolean;
 }
 

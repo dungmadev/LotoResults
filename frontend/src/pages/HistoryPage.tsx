@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { fetchResults } from '../services/api';
 import { REGION_NAMES } from '../types';
 import type { Region } from '../types';
@@ -8,16 +8,6 @@ import LoadingSkeleton from '../components/LoadingSkeleton';
 import ErrorState, { EmptyState } from '../components/ErrorState';
 
 type TimeRange = 7 | 30 | 90;
-
-function getDateRange(days: number): { start: string; end: string } {
-    const end = new Date();
-    const start = new Date();
-    start.setDate(start.getDate() - days);
-    return {
-        start: start.toISOString().split('T')[0],
-        end: end.toISOString().split('T')[0],
-    };
-}
 
 function getDatesInRange(days: number): string[] {
     const dates: string[] = [];
@@ -30,9 +20,25 @@ function getDatesInRange(days: number): string[] {
 }
 
 export default function HistoryPage() {
-    const [timeRange, setTimeRange] = useState<TimeRange>(7);
-    const [regionFilter, setRegionFilter] = useState<string>('');
+    const [searchParams, setSearchParams] = useSearchParams();
+    
+    // Initialize state from URL params
+    const [timeRange, setTimeRange] = useState<TimeRange>(() => {
+        const rangeParam = searchParams.get('range');
+        return (rangeParam === '7' || rangeParam === '30' || rangeParam === '90') 
+            ? parseInt(rangeParam) as TimeRange 
+            : 7;
+    });
+    const [regionFilter, setRegionFilter] = useState<string>(searchParams.get('region') || '');
     const navigate = useNavigate();
+
+    // Update URL when filters change
+    useEffect(() => {
+        const params = new URLSearchParams();
+        params.set('range', timeRange.toString());
+        if (regionFilter) params.set('region', regionFilter);
+        setSearchParams(params, { replace: true });
+    }, [timeRange, regionFilter, setSearchParams]);
 
     const dates = getDatesInRange(timeRange);
 
@@ -62,7 +68,7 @@ export default function HistoryPage() {
         if (!acc[result.draw_date]) {
             acc[result.draw_date] = [];
         }
-        acc[result.draw_date].push(result);
+        acc[result.draw_date]!.push(result);
         return acc;
     }, {} as Record<string, typeof results>);
 
