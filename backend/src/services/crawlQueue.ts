@@ -190,12 +190,17 @@ class CrawlQueue extends EventEmitter {
             nextJob.status = 'done';
             nextJob.completedAt = new Date().toISOString();
 
-            // Increment batch progress by number of provinces crawled
-            const provincesCrawled = result.provinceCount || 1;
+            // Increment batch progress by number of provinces crawled.
+            // If crawl returned 0 provinces (source error/no data), fall back to
+            // expected province count so progress bar never gets stuck.
+            const expectedProvinces = this.calculateProvinceCount(nextJob.date, [nextJob.region]);
+            const provincesCrawled = result.provinceCount > 0 ? result.provinceCount : expectedProvinces;
             this.batchCompleted += provincesCrawled;
 
             // Build province names display
-            const provinceNames = result.provinceNames?.join(', ') || regionName;
+            const provinceNames = result.provinceNames?.length > 0
+                ? result.provinceNames.join(', ')
+                : regionName;
 
             // Invalidate all cached results for this date so next fetch gets fresh DB data
             clearByPrefix(`results:${nextJob.date}`);
@@ -208,7 +213,9 @@ class CrawlQueue extends EventEmitter {
                 type: 'data-ready',
                 job: nextJob,
                 savedCount: result.savedCount,
-                message: `Đã cập nhật: ${provinceNames} (${result.savedCount} kết quả)`,
+                message: result.savedCount > 0
+                    ? `Đã cập nhật: ${provinceNames} (${result.savedCount} kết quả)`
+                    : `Không có dữ liệu mới cho ${regionName}`,
             });
 
         } catch (error) {

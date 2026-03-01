@@ -1,11 +1,12 @@
 import express from 'express';
 import cors from 'cors';
-import { initializeDb } from './db/database';
-import { seedDatabase } from './db/seed';
+import { initializeDb, getDb } from './db/database';
+import { syncProvinces } from './db/seed';
 import apiRoutes from './routes/api';
 import { apiLimiter, sanitizeInput, errorHandler } from './middleware';
 import { crawlQueue } from './services/crawlQueue';
 import { sseManager } from './services/sseManager';
+import { startCleanupScheduler } from './services/cleanup';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -46,29 +47,42 @@ app.use(errorHandler);
 // Initialize DB and start server
 async function start(): Promise<void> {
     try {
-        // Initialize database
+        // Initialize database (creates tables + runs migrations)
         initializeDb();
 
-        // Check if we need to seed
-        const Database = require('better-sqlite3');
-        const path = require('path');
-        const fs = require('fs');
-        const dbPath = path.join(__dirname, '..', 'data', 'xoso.db');
-
-        if (fs.existsSync(dbPath)) {
-            const db = new Database(dbPath);
-            const count = db.prepare('SELECT COUNT(*) as count FROM draws').get() as any;
-            db.close();
-            if (count.count === 0) {
-                console.log('📦 Database empty, seeding...');
-                seedDatabase();
-            } else {
-                console.log(`📊 Database has ${count.count} draws`);
-            }
-        } else {
-            console.log('📦 No database found, seeding...');
-            seedDatabase();
+        // Clean up old seed data if it exists (one-time migration)
+        const db = getDb();
+        const seedDraws = db.prepare("SELECT COUNT(*) as count FROM draws WHERE source = 'seed-data'").get() as any;
+        if (seedDraws.count > 0) {
+            console.log(`🧹 Removing ${seedDraws.count} seed draws (fake data)...`);
+            db.exec("DELETE FROM draws WHERE source = 'seed-data'");
+            console.log('✅ Seed data removed — will crawl real data on startup');
         }
+
+        // Clean up duplicate prizes (from previous bug where prizes weren't deleted before re-insert)
+        const dupes = db.prepare(`
+            SELECT draw_id, prize_code, COUNT(*) as cnt
+            FROM prizes
+            GROUP BY draw_id, prize_code
+            HAVING cnt > 1
+        `).all() as { draw_id: number; prize_code: string; cnt: number }[];
+
+        if (dupes.length > 0) {
+            console.log(`🧹 Fixing ${dupes.length} duplicate prize entries...`);
+            for (const dupe of dupes) {
+                // Keep only the latest prize (highest id), delete the rest
+                db.prepare(`
+                    DELETE FROM prizes WHERE draw_id = ? AND prize_code = ?
+                    AND id NOT IN (
+                        SELECT MAX(id) FROM prizes WHERE draw_id = ? AND prize_code = ?
+                    )
+                `).run(dupe.draw_id, dupe.prize_code, dupe.draw_id, dupe.prize_code);
+            }
+            console.log('✅ Duplicate prizes cleaned up');
+        }
+
+        // Always sync provinces → ensures new provinces from code are in DB
+        syncProvinces();
 
         app.listen(PORT, () => {
             console.log(`\n🚀 XỔ SỐ API Server running at http://localhost:${PORT}`);
@@ -83,6 +97,9 @@ async function start(): Promise<void> {
 
             // Ensure SSE manager is initialized (singleton)
             console.log(`📡 SSE Manager: Ready (${sseManager.getClientCount()} clients)`);
+
+            // Start cleanup scheduler (auto-delete old data)
+            startCleanupScheduler();
         });
     } catch (error) {
         console.error('❌ Failed to start server:', error);

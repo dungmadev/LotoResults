@@ -34,16 +34,17 @@ const SOURCES: SourceConfig[] = [
         parseMTMN: parseXosoComVnMTMN,
     },
     {
-        name: 'minhngoc.net.vn',
-        buildUrl: buildMinhNgocUrl,
-        parseMB: parseMinhNgocMB,
-        parseMTMN: parseMinhNgocMTMN,
-    },
-    {
         name: 'xskt.com.vn',
         buildUrl: buildXSKTUrl,
         parseMB: parseXSKTMB,
         parseMTMN: parseXSKTMTMN,
+    },
+    {
+        // Deprioritized: minhngoc frequently returns empty/blocked responses
+        name: 'minhngoc.net.vn',
+        buildUrl: buildMinhNgocUrl,
+        parseMB: parseMinhNgocMB,
+        parseMTMN: parseMinhNgocMTMN,
     },
 ];
 
@@ -247,6 +248,8 @@ export function computeChecksum(result: CrawledResult): string {
 }
 
 // Save crawled results to database
+// Each province is saved individually — if one fails (e.g., unknown province_id
+// causing FOREIGN KEY violation), the rest are still saved successfully.
 export function saveCrawledResults(results: CrawledResult[], sourceName: string): number {
     const db = getDb();
     let savedCount = 0;
@@ -265,39 +268,51 @@ export function saveCrawledResults(results: CrawledResult[], sourceName: string)
         'INSERT INTO prizes (draw_id, prize_code, numbers) VALUES (?, ?, ?)'
     );
 
-    const saveAll = db.transaction(() => {
-        for (const result of results) {
-            const checksum = computeChecksum(result);
-            const existing = checkExisting.get(result.draw_date, result.province_id) as any;
+    // Save each province in its own mini-transaction
+    // so a failure in one province doesn't rollback others
+    const saveOne = db.transaction((result: CrawledResult) => {
+        const checksum = computeChecksum(result);
+        const existing = checkExisting.get(result.draw_date, result.province_id) as any;
 
-            let drawId: number;
+        let drawId: number;
 
-            if (existing) {
-                if (existing.checksum === checksum) {
-                    logCrawl('INFO', `No changes detected for ${result.province_id} on ${result.draw_date}`);
-                    continue;
-                }
-                updateDraw.run(sourceName, new Date().toISOString(), checksum, existing.id);
-                deletePrizes.run(existing.id);
-                drawId = existing.id;
-                logCrawl('INFO', `Updated draw ${result.province_id} on ${result.draw_date}`);
-            } else {
-                const res = insertDraw.run(
-                    result.draw_date, result.region, result.province_id,
-                    sourceName, new Date().toISOString(), checksum
-                );
-                drawId = Number(res.lastInsertRowid);
-                logCrawl('INFO', `New draw saved: ${result.province_id} on ${result.draw_date}`);
+        if (existing) {
+            if (existing.checksum === checksum) {
+                logCrawl('INFO', `No changes detected for ${result.province_id} on ${result.draw_date}`);
+                return false; // Not saved (no change)
             }
-
-            for (const prize of result.prizes) {
-                insertPrize.run(drawId, prize.prize_code, JSON.stringify(prize.numbers));
-            }
-            savedCount++;
+            updateDraw.run(sourceName, new Date().toISOString(), checksum, existing.id);
+            drawId = existing.id;
+            logCrawl('INFO', `Updated draw ${result.province_id} on ${result.draw_date}`);
+        } else {
+            const res = insertDraw.run(
+                result.draw_date, result.region, result.province_id,
+                sourceName, new Date().toISOString(), checksum
+            );
+            drawId = Number(res.lastInsertRowid);
+            logCrawl('INFO', `New draw saved: ${result.province_id} on ${result.draw_date}`);
         }
+
+        // Always delete old prizes before inserting new ones
+        // (prevents duplicates from seed data or previous partial saves)
+        deletePrizes.run(drawId);
+
+        for (const prize of result.prizes) {
+            insertPrize.run(drawId, prize.prize_code, JSON.stringify(prize.numbers));
+        }
+        return true; // Saved successfully
     });
 
-    saveAll();
+    for (const result of results) {
+        try {
+            const saved = saveOne(result);
+            if (saved) savedCount++;
+        } catch (error) {
+            // Log and skip this province — don't break the rest
+            logCrawl('WARN', `Failed to save ${result.province_id} on ${result.draw_date}: ${(error as Error).message}`);
+        }
+    }
+
     return savedCount;
 }
 

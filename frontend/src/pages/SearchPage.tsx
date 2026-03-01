@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { fetchResults, fetchProvinces, searchByNumber } from '../services/api';
 import type { FetchResultsResponse } from '../services/api';
 import { REGION_NAMES, PRIZE_NAMES } from '../types';
@@ -8,10 +8,12 @@ import type { Region, DrawResult } from '../types';
 import ResultTable from '../components/ResultTable';
 import LoadingSkeleton from '../components/LoadingSkeleton';
 import ErrorState, { EmptyState } from '../components/ErrorState';
+import { formatDateDisplay } from '../utils/dateFormat';
 import AdvancedSearchOptions, { type SearchFilters } from '../components/AdvancedSearchOptions';
 
 export default function SearchPage() {
     const [searchParams, setSearchParams] = useSearchParams();
+    const dateRef = useRef<HTMLInputElement>(null);
 
     const [date, setDate] = useState(searchParams.get('date') || new Date().toISOString().split('T')[0]);
     const [region, setRegion] = useState<string>(searchParams.get('region') || '');
@@ -65,6 +67,14 @@ export default function SearchPage() {
                 province: province || undefined,
             }),
         staleTime: 1000 * 60 * 2,
+        // Auto-refetch every 3s while backend is crawling data
+        refetchInterval: (query) => {
+            const data = query.state.data;
+            if (data && 'meta' in data && data.meta?.status === 'crawling') {
+                return 3000;
+            }
+            return false;
+        },
     });
 
     // Normalize: fetchResults returns { results, meta }, searchByNumber returns DrawResult[]
@@ -115,12 +125,19 @@ export default function SearchPage() {
             <div className="filters-bar animate-fade-in stagger-1">
                 <div className="filter-group">
                     <label className="filter-label">Ngày</label>
-                    <input
-                        type="date"
-                        className="filter-input"
-                        value={date}
-                        onChange={(e) => handleDateChange(e.target.value)}
-                    />
+                    <div
+                        className="date-picker-compact"
+                        onClick={() => dateRef.current?.showPicker()}
+                    >
+                        <span className="date-display">📅 {formatDateDisplay(date)}</span>
+                        <input
+                            ref={dateRef}
+                            type="date"
+                            className="date-input-hidden"
+                            value={date}
+                            onChange={(e) => handleDateChange(e.target.value)}
+                        />
+                    </div>
                 </div>
 
                 <div className="filter-group">
@@ -231,7 +248,16 @@ export default function SearchPage() {
                     onRetry={() => refetch()}
                 />
             ) : !results || results.length === 0 ? (
-                <EmptyState message={`Không có kết quả xổ số cho ngày ${date}${region ? ` - ${REGION_NAMES[region as Region]}` : ''}`} />
+                crawlStatus.status === 'crawling' ? (
+                    /* Data is being crawled — show loading instead of empty */
+                    <div className="card">
+                        <div className="card-body">
+                            <LoadingSkeleton rows={8} />
+                        </div>
+                    </div>
+                ) : (
+                    <EmptyState message={`Không có kết quả xổ số cho ngày ${date}${region ? ` - ${REGION_NAMES[region as Region]}` : ''}`} />
+                )
             ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
                     {results.map((result: DrawResult, idx: number) => (
@@ -248,7 +274,7 @@ export default function SearchPage() {
                                     <span className="card-title">{result.province_name}</span>
                                 </div>
                                 <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                                    📅 {result.draw_date}
+                                    📅 {formatDateDisplay(result.draw_date)}
                                 </span>
                             </div>
                             <div className="card-body">
