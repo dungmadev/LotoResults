@@ -13,11 +13,6 @@ export interface QueueProgressState {
     message: string;
     /** Current batch ID — changes when a new batch starts */
     batchId: string | null;
-    /** Source info from Race & Fallback crawler */
-    sourceInfo?: {
-        activeSources: string[];
-        winnerSource?: string;
-    };
 }
 
 // --- Default state ---

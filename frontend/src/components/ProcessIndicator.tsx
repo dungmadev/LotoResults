@@ -12,7 +12,7 @@ import { useQueueProgress } from '../hooks/useQueueProgressContext';
  * - Does NOT overlay content — uses sticky positioning in document flow
  */
 export default function ProcessIndicator() {
-    const { visible, progress, status, message, sourceInfo } = useQueueProgress();
+    const { visible, progress, status, message } = useQueueProgress();
 
     // Build CSS class names based on state
     const containerClass = [
@@ -94,13 +94,6 @@ export default function ProcessIndicator() {
 
                 {/* Status message */}
                 <span className="process-indicator-message">{message}</span>
-
-                {/* Source info badge */}
-                {sourceInfo?.winnerSource && (
-                    <span className="process-indicator-source">
-                        🏆 {sourceInfo.winnerSource}
-                    </span>
-                )}
 
                 {/* Percentage display */}
                 <span className="process-indicator-percent">{progress}%</span>

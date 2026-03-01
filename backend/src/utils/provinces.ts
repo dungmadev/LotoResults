@@ -75,3 +75,44 @@ export function findProvinceId(name: string, region: Region): string {
     console.warn(`[PROVINCE] Could not match province for "${name}" in region ${region}. Using generic.`);
     return `${region}_general`;
 }
+
+// --- Day-of-week helpers ---
+
+const DAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+
+/**
+ * Get the English day name for a date string (YYYY-MM-DD)
+ */
+function getDayName(dateStr: string): string {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const dayIndex = new Date(y, m - 1, d).getDay();
+    return DAY_NAMES[dayIndex];
+}
+
+/**
+ * Get all provinces that draw on a specific date.
+ * Used to calculate total province count for progress bar.
+ *
+ * @param dateStr - Date in YYYY-MM-DD format
+ * @param region - Optional region filter (mb, mt, mn). If omitted, returns all regions.
+ * @returns Array of { id, name, region } for provinces drawing on that date
+ */
+export function getProvincesForDate(dateStr: string, region?: Region): { id: string; name: string; region: Region }[] {
+    const dayName = getDayName(dateStr);
+
+    return PROVINCES
+        .filter(p => {
+            const matchDay = p.draw_days.includes(dayName);
+            const matchRegion = region ? p.region === region : true;
+            return matchDay && matchRegion;
+        })
+        .map(p => ({ id: p.id, name: p.name, region: p.region }));
+}
+
+/**
+ * Count total provinces drawing on a specific date.
+ * Quick helper for progress bar total calculation.
+ */
+export function countProvincesForDate(dateStr: string, region?: Region): number {
+    return getProvincesForDate(dateStr, region).length;
+}

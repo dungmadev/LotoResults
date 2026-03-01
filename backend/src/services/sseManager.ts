@@ -34,7 +34,6 @@ class SSEManager {
                 },
                 savedCount: event.savedCount,
                 progress: event.progress,
-                sourceInfo: event.sourceInfo,
                 timestamp: new Date().toISOString(),
             });
         });

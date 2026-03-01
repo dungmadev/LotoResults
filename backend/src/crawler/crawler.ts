@@ -47,9 +47,14 @@ const SOURCES: SourceConfig[] = [
     },
 ];
 
-// --- Fake Progress Delay ---
+// --- Crawl Result Type ---
 
-const FAKE_PROGRESS_DELAY_MS = 250; // 200-300ms delay for UX
+export interface CrawlResult {
+    savedCount: number;
+    provinceCount: number;
+    provinceNames: string[];
+    sourceName: string;
+}
 
 // --- xoso.com.vn URL Builder (existing source) ---
 
@@ -325,7 +330,6 @@ async function fetchFromSource(
     date: string,
     region: Region,
     cancelToken: CancelTokenSource,
-    onProgress?: (sourceName: string, status: 'fetching' | 'parsing' | 'done' | 'failed') => void,
 ): Promise<{ results: CrawledResult[]; sourceName: string }> {
     // Check if source supports this region
     if (source.supportedRegions && !source.supportedRegions.includes(region)) {
@@ -334,7 +338,6 @@ async function fetchFromSource(
 
     const url = source.buildUrl(date, region);
     logCrawl('INFO', `[Race] Fetching from ${source.name}: ${url}`);
-    onProgress?.(source.name, 'fetching');
 
     try {
         const response = await axios.get(url, {
@@ -351,7 +354,7 @@ async function fetchFromSource(
             throw new Error(`HTTP ${response.status}`);
         }
 
-        onProgress?.(source.name, 'parsing');
+        // Parse response
 
         // Parse based on region
         let rawResults: CrawledResult[];
@@ -373,7 +376,7 @@ async function fetchFromSource(
 
         const total = countPrizeNumbers(normalized);
         logCrawl('INFO', `[Race] ✅ ${source.name} returned sufficient data (${total} numbers)`);
-        onProgress?.(source.name, 'done');
+        logCrawl('INFO', `[Race] ✅ ${source.name} — ${normalized.length} province(s) parsed`);
 
         return { results: normalized, sourceName: source.name };
     } catch (error) {
@@ -381,7 +384,7 @@ async function fetchFromSource(
             logCrawl('INFO', `[Race] ⚡ ${source.name} aborted (another source won the race)`);
             throw error; // Re-throw cancel to respect Promise.any semantics
         }
-        onProgress?.(source.name, 'failed');
+        // Source failed — let Promise.any try others
         logCrawl('WARN', `[Race] ❌ ${source.name} failed: ${(error as Error).message}`);
         throw error;
     }
@@ -393,15 +396,13 @@ async function fetchFromSource(
  * 1. Fetch from all sources concurrently
  * 2. First source to return "sufficient" data wins
  * 3. Cancel remaining requests immediately
- * 4. Fall back to any source if all fail
  *
- * @param onSourceProgress - callback to emit SSE progress for each source
+ * @returns CrawlResult with savedCount, provinceCount, provinceNames, sourceName
  */
 export async function crawl(
     date: string,
     region: Region,
-    onSourceProgress?: (sourceName: string, status: 'fetching' | 'parsing' | 'done' | 'failed') => void,
-): Promise<number> {
+): Promise<CrawlResult> {
     logCrawl('INFO', `Starting crawl for ${region} on ${date} (Race & Fallback, ${SOURCES.length} sources)`);
 
     // Filter sources that support this region
@@ -411,23 +412,17 @@ export async function crawl(
 
     if (activeSources.length === 0) {
         logCrawl('ERROR', `No sources available for ${region}`);
-        return 0;
+        return { savedCount: 0, provinceCount: 0, provinceNames: [], sourceName: '' };
     }
 
     // Create a CancelTokenSource per source for independent cancellation
     const cancelTokens: CancelTokenSource[] = activeSources.map(() => axios.CancelToken.source());
 
-    // Emit initial progress
-    onSourceProgress?.(`Đang kết nối ${activeSources.length} nguồn...`, 'fetching');
-
-    // Small delay for UX (fake progress feel)
-    await new Promise(resolve => setTimeout(resolve, FAKE_PROGRESS_DELAY_MS));
-
     try {
         // Race all sources — first to return sufficient data wins
         const { results, sourceName } = await Promise.any(
             activeSources.map((source, index) =>
-                fetchFromSource(source, date, region, cancelTokens[index], onSourceProgress)
+                fetchFromSource(source, date, region, cancelTokens[index])
             )
         );
 
@@ -437,13 +432,24 @@ export async function crawl(
             token.cancel(`Race won by ${sourceName}`);
         }
 
-        // Small delay for UX
-        await new Promise(resolve => setTimeout(resolve, FAKE_PROGRESS_DELAY_MS));
-
         // Save to database
         const saved = saveCrawledResults(results, sourceName);
-        logCrawl('INFO', `Successfully saved ${saved} results from ${sourceName}`);
-        return saved;
+
+        // Extract province info from results
+        const { PROVINCES } = await import('../utils/provinces');
+        const provinceNames = results.map(r => {
+            const province = PROVINCES.find(p => p.id === r.province_id);
+            return province?.name || r.province_id;
+        });
+
+        logCrawl('INFO', `Successfully saved ${saved} results (${results.length} provinces) from ${sourceName}`);
+
+        return {
+            savedCount: saved,
+            provinceCount: results.length,
+            provinceNames,
+            sourceName,
+        };
 
     } catch (error: unknown) {
         // All sources failed — AggregateError from Promise.any
@@ -453,7 +459,7 @@ export async function crawl(
         } else {
             logCrawl('ERROR', `[Race] Unexpected error: ${error instanceof Error ? error.message : String(error)}`);
         }
-        return 0;
+        return { savedCount: 0, provinceCount: 0, provinceNames: [], sourceName: '' };
     }
 }
 
@@ -470,8 +476,8 @@ export async function crawlBackfill(days: number = 30): Promise<number> {
         const dateStr = date.toISOString().split('T')[0];
 
         try {
-            const saved = await crawl(dateStr, 'mb');
-            totalSaved += saved;
+            const result = await crawl(dateStr, 'mb');
+            totalSaved += result.savedCount;
 
             // Rate limit: wait 500ms between requests
             if (i < days - 1) {

@@ -21,7 +21,7 @@ export default function SSEProvider({ children }: { children: React.ReactNode })
     const queryClient = useQueryClient();
     const { toasts, addToast, dismissToast } = useToast();
     const {
-        visible, progress, status, message, batchId, sourceInfo,
+        visible, progress, status, message, batchId,
         handleProgressEvent,
     } = useQueueProgressHook();
 
@@ -64,7 +64,7 @@ export default function SSEProvider({ children }: { children: React.ReactNode })
     useServerEvents(handleSSEEvent);
 
     // Provide progress state via context for ProcessIndicator
-    const progressState = { visible, progress, status, message, batchId, sourceInfo };
+    const progressState = { visible, progress, status, message, batchId };
 
     return (
         <QueueProgressContext.Provider value={progressState}>
